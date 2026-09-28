@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   commands,
   type Settings_Serialize as Settings,
@@ -6,6 +6,7 @@ import {
 } from "@/bindings";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
 import { IconButton } from "@/components/IconButton";
+import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
 
 const MODES: { value: WindowPolicy; label: string; hint: string }[] = [
   { value: "smart", label: "智能", hint: "隐藏一段时间后释放界面，兼顾速度与内存" },
@@ -69,8 +70,13 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const rootRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  useFitWindowHeight(rootRef, scrollRef, contentRef);
+
   return (
-    <div className="flex h-full flex-col">
+    <div ref={rootRef} className="flex h-full flex-col">
       <header className="flex items-center gap-1 px-2 pt-3 pb-2">
         <IconButton label="返回" onClick={onBack}>
           <ArrowLeft size={16} />
@@ -78,51 +84,55 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
         <h1 className="text-sm font-semibold">设置</h1>
       </header>
 
-      {settings && (
-        <section className="mx-3 rounded-xl border border-border bg-card p-3">
-          <p className="font-medium">运行模式</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">窗口隐藏后如何处理界面</p>
-          <div className="mt-3 flex flex-col gap-2" role="radiogroup" aria-label="运行模式">
-            {MODES.map((mode) => {
-              const selected = settings.windowPolicy === mode.value;
-              return (
-                <button
-                  key={mode.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => save({ ...settings, windowPolicy: mode.value })}
-                  className={`rounded-md border px-3 py-2 text-left ${
-                    selected ? "border-primary bg-primary/10" : "border-border hover:bg-accent"
-                  }`}
-                >
-                  <div className="font-medium">{mode.label}</div>
-                  <div className="text-xs text-muted-foreground">{mode.hint}</div>
-                </button>
-              );
-            })}
-          </div>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={contentRef} className="pb-3">
+          {settings && (
+            <section className="mx-3 rounded-xl border border-border bg-card p-3">
+              <p className="font-medium">运行模式</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">窗口隐藏后如何处理界面</p>
+              <div className="mt-3 flex flex-col gap-2" role="radiogroup" aria-label="运行模式">
+                {MODES.map((mode) => {
+                  const selected = settings.windowPolicy === mode.value;
+                  return (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => save({ ...settings, windowPolicy: mode.value })}
+                      className={`rounded-md border px-3 py-2 text-left ${
+                        selected ? "border-primary bg-primary/10" : "border-border hover:bg-accent"
+                      }`}
+                    >
+                      <div className="font-medium">{mode.label}</div>
+                      <div className="text-xs text-muted-foreground">{mode.hint}</div>
+                    </button>
+                  );
+                })}
+              </div>
 
-          {settings.windowPolicy === "smart" && (
-            <label className="mt-3 flex items-center justify-between gap-2 text-sm">
-              <span>
-                释放等待时间
-                <span className="block text-xs text-muted-foreground">
-                  {MIN_SECONDS}–{MAX_SECONDS} 秒
-                </span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <SecondsInput
-                  value={settings.smartReleaseSeconds}
-                  onCommit={(seconds) => save({ ...settings, smartReleaseSeconds: seconds })}
-                />
-                秒
-              </span>
-            </label>
+              {settings.windowPolicy === "smart" && (
+                <label className="mt-3 flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    释放等待时间
+                    <span className="block text-xs text-muted-foreground">
+                      {MIN_SECONDS}–{MAX_SECONDS} 秒
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <SecondsInput
+                      value={settings.smartReleaseSeconds}
+                      onCommit={(seconds) => save({ ...settings, smartReleaseSeconds: seconds })}
+                    />
+                    秒
+                  </span>
+                </label>
+              )}
+              {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+            </section>
           )}
-          {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-        </section>
-      )}
+        </div>
+      </div>
     </div>
   );
 }

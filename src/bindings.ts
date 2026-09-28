@@ -14,6 +14,8 @@ export const commands = {
 	setAppMute: (appId: string, muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_app_mute", { appId, muted })),
 	/**  前端首次渲染完成。新建的窗口在此之后才显示，避免出现空白窗口。 */
 	windowReady: () => __TAURI_INVOKE<void>("window_ready"),
+	/**  前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。 */
+	fitWindowHeight: (contentHeight: number) => __TAURI_INVOKE<void>("fit_window_height", { contentHeight }),
 	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings"),
 	/**  保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。 */
 	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),

@@ -51,7 +51,8 @@ export function VolumeSlider({ value, onChange, muted, label, className }: Volum
   return (
     <SliderPrimitive.Root
       className={cn(
-        "relative flex h-5 w-full touch-none items-center select-none",
+        // 高度即可点击范围：比轨道高得多，便于点中；与旁边的静音按钮等高。
+        "relative flex h-7 w-full cursor-pointer touch-none items-center select-none",
         muted && "opacity-50",
         className,
       )}
@@ -77,9 +78,11 @@ export function VolumeSlider({ value, onChange, muted, label, className }: Volum
       </SliderPrimitive.Track>
       <SliderPrimitive.Thumb
         className={cn(
-          "block size-4 rounded-full border-4 border-primary bg-background shadow-sm",
+          "relative block size-4 rounded-full border-4 border-primary bg-background shadow-sm",
           "transition-[border-width] duration-150 hover:border-[3px] active:border-[5px]",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          // 不可见的扩展区域，拖柄实际可抓取范围为 32×32 px。
+          "after:absolute after:-inset-2 after:rounded-full after:content-['']",
         )}
       />
     </SliderPrimitive.Root>

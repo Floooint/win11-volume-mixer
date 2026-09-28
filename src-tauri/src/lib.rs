@@ -1,3 +1,4 @@
+mod animation;
 mod audio;
 mod commands;
 mod config;
@@ -25,6 +26,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_app_volume,
             commands::set_app_mute,
             commands::window_ready,
+            commands::fit_window_height,
             commands::get_settings,
             commands::set_settings,
         ])

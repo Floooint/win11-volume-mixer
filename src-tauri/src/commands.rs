@@ -62,6 +62,13 @@ pub fn window_ready(app: tauri::AppHandle) {
     crate::window::ready(&app);
 }
 
+/// 前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。
+#[tauri::command]
+#[specta::specta]
+pub fn fit_window_height(window: tauri::WebviewWindow, content_height: f64) {
+    crate::window::fit_height(&window, content_height);
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn get_settings(config: State<'_, Config>) -> Settings {

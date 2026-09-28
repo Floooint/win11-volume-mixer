@@ -4,19 +4,28 @@
 //! 智能（保留一段时间，超时未打开再释放）。
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::async_runtime::JoinHandle;
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, Runtime, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
 };
 
+use crate::animation::{self, Generation};
 use crate::config::{Config, WindowPolicy};
 
 pub const MAIN: &str = "main";
 
 /// 窗口与任务栏之间的间距（物理像素，按 DPI 缩放前为 12 px）。
 const MARGIN: f64 = 12.0;
+
+/// 窗口最小高度（逻辑像素）。
+const MIN_HEIGHT: f64 = 160.0;
+
+/// 窗口最大高度占屏幕高度的比例。
+const MAX_SCREEN_RATIO: f64 = 0.8;
 
 /// 点击托盘图标时，窗口会先因失焦而隐藏，紧接着收到点击事件。
 /// 在这个时间窗口内的点击视为“关闭”，不再重新打开。
@@ -31,6 +40,12 @@ pub struct WindowState {
     pending: Mutex<Option<Pending>>,
     /// 智能模式下的释放计时器；再次打开窗口时取消。
     release_timer: Mutex<Option<JoinHandle<()>>>,
+    /// 最近一次托盘图标位置，用于高度变化后重新定位，以及没有托盘位置的打开请求。
+    last_tray: Mutex<Option<Rect>>,
+    /// 滑出动画代数，打开窗口时递增以取消进行中的动画。
+    animation: Generation,
+    /// 是否正在播放滑出动画。
+    hiding: AtomicBool,
 }
 
 struct Pending {
@@ -174,10 +189,11 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
-/// 在托盘图标附近显示窗口；`tray` 为 `None` 时（如重复启动）保持原位置。
+/// 在托盘图标附近显示窗口；`tray` 为 `None` 时（如重复启动）使用上次的托盘位置。
 pub fn show<R: Runtime>(app: &AppHandle<R>, tray: Option<Rect>) {
     let requested_at = Instant::now();
     cancel_release_timer(app);
+    cancel_hide_animation(app);
     match main_window(app) {
         Some(window) => {
             // 窗口正在创建、尚未渲染完成时，等 `ready` 统一显示。
@@ -223,6 +239,7 @@ pub fn ready<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
+    let tray = remember_tray(window, tray);
     if let Some(tray) = tray
         && let Err(e) = move_near_tray(window, tray)
     {
@@ -233,19 +250,127 @@ fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
     let _ = window.set_focus();
 }
 
+/// 记录新的托盘位置；没有新位置时返回上次记录的位置。
+fn remember_tray<R: Runtime, M: Manager<R>>(manager: &M, tray: Option<Rect>) -> Option<Rect> {
+    let state = manager.state::<WindowState>();
+    let mut last = state.last_tray.lock().ok()?;
+    if tray.is_some() {
+        *last = tray;
+    }
+    *last
+}
+
+fn cancel_hide_animation<R: Runtime, M: Manager<R>>(manager: &M) {
+    let state = manager.state::<WindowState>();
+    state.animation.next();
+    state.hiding.store(false, Ordering::SeqCst);
+}
+
+/// 隐藏窗口：先向下滑出屏幕，再按运行模式隐藏或释放。
 fn hide<R: Runtime>(window: &tauri::Window<R>) {
+    let state = window.state::<WindowState>();
+    if state.hiding.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let generation = state.animation.next();
+    let window = window.clone();
+    // 动画逐帧 sleep，放在独立线程，不阻塞事件循环。
+    std::thread::spawn(move || {
+        let origin = window.outer_position().ok();
+        let completed = match (origin, window.current_monitor().ok().flatten()) {
+            (Some(origin), Some(monitor)) => {
+                let bottom = monitor.position().y + monitor.size().height as i32;
+                let state = window.state::<WindowState>();
+                animation::slide(
+                    origin.y,
+                    bottom,
+                    || state.animation.is_current(generation),
+                    |y| {
+                        let _ = window.set_position(PhysicalPosition::new(origin.x, y));
+                    },
+                )
+            }
+            // 取不到位置时跳过动画，直接隐藏。
+            _ => true,
+        };
+        if !completed {
+            return;
+        }
+        let state = window.state::<WindowState>();
+        if !state.animation.is_current(generation) {
+            return;
+        }
+        let destroyed = finish_hide(&window);
+        // 窗口已不可见，移回原位，下次显示时不会从屏幕外出现。
+        if !destroyed && let Some(origin) = origin {
+            let _ = window.set_position(origin);
+        }
+        state.hiding.store(false, Ordering::SeqCst);
+    });
+}
+
+/// 按运行模式隐藏或释放窗口，返回窗口是否已销毁。
+fn finish_hide<R: Runtime>(window: &tauri::Window<R>) -> bool {
     match policy(window) {
         WindowPolicy::Resident => {
             let _ = window.hide();
+            false
         }
         WindowPolicy::Silent => {
             let _ = window.destroy();
+            true
         }
         WindowPolicy::Smart => {
             let _ = window.hide();
             start_release_timer(window);
+            false
         }
     }
+}
+
+/// 根据内容高度计算窗口高度（物理像素）：不低于最小高度，
+/// 不超过屏幕高度的 4/5，也不超出工作区（留出与任务栏的间距）。
+pub fn fitted_height(content: f64, scale: f64, screen_height: f64, work_area_height: f64) -> u32 {
+    let max = (screen_height * MAX_SCREEN_RATIO).min(work_area_height - 2.0 * MARGIN * scale);
+    let min = (MIN_HEIGHT * scale).min(max);
+    (content * scale).clamp(min, max).round() as u32
+}
+
+/// 前端报告内容高度（逻辑像素）后调整窗口高度，并保持贴近托盘。
+pub fn fit_height<R: Runtime>(window: &WebviewWindow<R>, content: f64) {
+    if let Err(e) = try_fit_height(window, content) {
+        eprintln!("[window] 调整高度失败：{e}");
+    }
+}
+
+fn try_fit_height<R: Runtime>(window: &WebviewWindow<R>, content: f64) -> tauri::Result<()> {
+    if !content.is_finite() || content <= 0.0 {
+        return Ok(());
+    }
+    let Some(monitor) = window.current_monitor()?.or(window.primary_monitor()?) else {
+        return Ok(());
+    };
+    let height = fitted_height(
+        content,
+        monitor.scale_factor(),
+        monitor.size().height.into(),
+        monitor.work_area().size.height.into(),
+    );
+    let size = window.outer_size()?;
+    if size.height == height {
+        return Ok(());
+    }
+    window.set_size(PhysicalSize::new(size.width, height))?;
+
+    // 可见时立即重新定位；隐藏时由下次显示负责定位。滑出动画进行中不打断。
+    let state = window.state::<WindowState>();
+    if window.is_visible()? && !state.hiding.load(Ordering::SeqCst) {
+        let tray = state.last_tray.lock().ok().and_then(|t| *t);
+        if let Some(tray) = tray {
+            move_near_tray(window, tray)?;
+        }
+    }
+    Ok(())
 }
 
 fn move_near_tray<R: Runtime>(window: &WebviewWindow<R>, tray: Rect) -> tauri::Result<()> {
@@ -288,7 +413,10 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, tray: Rect) {
         .and_then(|mut t| t.take())
         .is_some_and(|t| t.elapsed() < REOPEN_GUARD);
 
+    let hiding = app.state::<WindowState>().hiding.load(Ordering::SeqCst);
     match main_window(app) {
+        // 滑出动画期间窗口仍可见，此时的点击视为“关闭”的延续，不重新打开。
+        Some(_) if hiding => {}
         Some(window) if window.is_visible().unwrap_or(false) => hide(&window.as_ref().window()),
         _ if !just_hidden => show(app, Some(tray)),
         _ => {}
@@ -339,6 +467,35 @@ mod tests {
         width: 1920.0,
         height: 1080.0,
     };
+
+    #[test]
+    fn 高度随内容变化并有下限() {
+        // 1080p、100% 缩放、工作区高 1032
+        assert_eq!(fitted_height(300.0, 1.0, 1080.0, 1032.0), 300);
+        assert_eq!(
+            fitted_height(50.0, 1.0, 1080.0, 1032.0),
+            160,
+            "不低于最小高度"
+        );
+    }
+
+    #[test]
+    fn 高度不超过屏幕的五分之四() {
+        assert_eq!(fitted_height(5000.0, 1.0, 1080.0, 1032.0), 864);
+    }
+
+    #[test]
+    fn 高度按缩放比例换算为物理像素() {
+        // 4K、200% 缩放：逻辑 300 → 物理 600
+        assert_eq!(fitted_height(300.0, 2.0, 2160.0, 2064.0), 600);
+        assert_eq!(fitted_height(5000.0, 2.0, 2160.0, 2064.0), 1728);
+    }
+
+    #[test]
+    fn 工作区很矮时高度不超出工作区() {
+        // 任务栏很高，工作区只剩 700：上限为 700 - 2×12
+        assert_eq!(fitted_height(5000.0, 1.0, 1080.0, 700.0), 676);
+    }
 
     #[test]
     fn 任务栏在底部时窗口贴在托盘图标上方() {
