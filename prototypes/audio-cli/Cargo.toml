@@ -1,0 +1,26 @@
+[package]
+name = "audio-cli"
+version = "0.1.0"
+edition = "2024"
+description = "阶段 1 音频原型：验证 Core Audio 读写与变化监听"
+publish = false
+
+[dependencies.windows]
+version = "0.62"
+features = [
+  "Win32_Foundation",
+  "Win32_Devices_FunctionDiscovery",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_Storage_FileSystem",
+  "Win32_Storage_Packaging_Appx",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+  "Win32_UI_Shell_PropertiesSystem",
+]
+
+[dependencies.windows-core]
+version = "0.62"

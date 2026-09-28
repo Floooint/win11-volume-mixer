@@ -6,7 +6,7 @@ dist/
 *.tsbuildinfo
 
 # Rust / Tauri 构建产物
-src-tauri/target/
+target/
 src-tauri/gen/schemas/
 
 # 日志与本地文件

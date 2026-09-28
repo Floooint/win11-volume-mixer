@@ -25,7 +25,7 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--wait --
 
 - Node 安装在 `C:\Program Files` 时，`corepack enable` 需要管理员权限，因此改用 npm 全局安装 pnpm（装在用户目录）。
 - 安装 VS Build Tools 时需要在 UAC 弹窗中确认，否则会以 `0x8013153B`（已取消）失败。
-- 安装 Rust 后需重新打开终端，`~/.cargo/bin` 才会加入 PATH。
+- 安装 Rust 后，需**完全退出 VS Code 再重新打开**，`~/.cargo/bin` 才会出现在终端的 PATH 中。若仍找不到 `cargo`，说明资源管理器未收到环境变量更新通知，注销并重新登录 Windows 即可（或广播一次 `WM_SETTINGCHANGE`）。可用 `Win + R` → `cmd` → `where cargo` 检查。
 - Node 版本管理工具（fnm / Volta）可选，会读取 `.node-version` 自动切换。
 
 项目骨架创建后：
