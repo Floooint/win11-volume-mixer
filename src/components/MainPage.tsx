@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 import { type AppAudio, commands } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Plus } from "@/components/animate-ui/icons/plus";
@@ -51,7 +51,13 @@ function ErrorToast() {
   );
 }
 
-function AppItem({ app }: { app: AppAudio }) {
+function AppItem({
+  app,
+  scrollAreaRef,
+}: {
+  app: AppAudio;
+  scrollAreaRef: RefObject<HTMLElement | null>;
+}) {
   const setAppVolume = useAudioStore((s) => s.setAppVolume);
   const setAppMute = useAudioStore((s) => s.setAppMute);
   const debug = useDebugStore();
@@ -81,6 +87,7 @@ function AppItem({ app }: { app: AppAudio }) {
         volume={app.volume}
         active={app.active}
         leading={<AppAvatar app={app} />}
+        scrollAreaRef={scrollAreaRef}
         trailing={
           isDebug && (
             <IconButton
@@ -141,41 +148,41 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         </div>
       </header>
 
+      {/* 系统音量固定在顶部，只有应用列表滚动。 */}
+      {device && (
+        <>
+          <section className="mx-3 rounded-xl border border-border bg-card px-3 py-3">
+            <VolumeRow
+              name="系统音量"
+              detail={device.name}
+              volume={device.master}
+              onVolumeChange={setMasterVolume}
+              onMuteChange={setMasterMute}
+              onVolumeCommit={() => void commands.playVolumeFeedback()}
+            />
+          </section>
+          <h2 className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">应用</h2>
+        </>
+      )}
+
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div ref={contentRef} className="pb-3">
           {snapshot === null ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">正在读取音频设备…</p>
-          ) : device ? (
-            <>
-              <section className="mx-3 rounded-xl border border-border bg-card px-3 py-3">
-                <VolumeRow
-                  name="系统音量"
-                  detail={device.name}
-                  volume={device.master}
-                  onVolumeChange={setMasterVolume}
-                  onMuteChange={setMasterMute}
-                  onVolumeCommit={() => void commands.playVolumeFeedback()}
-                />
-              </section>
-
-              <h2 className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">应用</h2>
-              <section className="px-3">
-                {apps.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
-                    <AudioLines size={24} animateOnView loop />
-                    <p>暂无正在使用声音的应用</p>
-                  </div>
-                ) : (
-                  <ul className="flex flex-col gap-1">
-                    {apps.map((app) => (
-                      <AppItem key={app.appId} app={app} />
-                    ))}
-                  </ul>
-                )}
-              </section>
-            </>
-          ) : (
+          ) : !device ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">未检测到输出设备</p>
+          ) : apps.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
+              <AudioLines size={24} animateOnView loop />
+              <p>暂无正在使用声音的应用</p>
+            </div>
+          ) : (
+            // 可滚动时滚轮用于滚动列表，不调节应用音量；系统音量不受影响。
+            <ul className="flex flex-col gap-1 px-3">
+              {apps.map((app) => (
+                <AppItem key={app.appId} app={app} scrollAreaRef={scrollRef} />
+              ))}
+            </ul>
           )}
         </div>
       </div>

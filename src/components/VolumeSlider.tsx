@@ -22,6 +22,8 @@ type VolumeSliderProps = {
   label: string;
   /** 响应滚轮的区域，默认为滑块本身。传入整行可让鼠标在行内任意位置滚动调节。 */
   wheelAreaRef?: RefObject<HTMLElement | null>;
+  /** 所在的滚动列表。列表可以滚动时，滚轮让给列表滚动，不再调节音量。 */
+  scrollAreaRef?: RefObject<HTMLElement | null>;
   className?: string;
 };
 
@@ -36,6 +38,7 @@ export function VolumeSlider({
   muted,
   label,
   wheelAreaRef,
+  scrollAreaRef,
   className,
 }: VolumeSliderProps) {
   const [local, setLocal] = useState(value);
@@ -96,6 +99,9 @@ export function VolumeSlider({
     if (!root) return;
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY === 0) return;
+      // 每次都重新判断，应用增减后立即生效。
+      const scroll = scrollAreaRef?.current;
+      if (scroll && scroll.scrollHeight > scroll.clientHeight) return;
       e.preventDefault();
       adjusting.current = true;
       update(localRef.current + (e.deltaY < 0 ? WHEEL_STEP : -WHEEL_STEP));
@@ -109,7 +115,7 @@ export function VolumeSlider({
     return () => root.removeEventListener("wheel", onWheel);
     // update 只读 ref，无需作为依赖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wheelAreaRef]);
+  }, [wheelAreaRef, scrollAreaRef]);
 
   return (
     <SliderPrimitive.Root

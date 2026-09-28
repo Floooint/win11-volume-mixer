@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { type ReactNode, type RefObject, useRef } from "react";
 import type { VolumeState } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { IconButton } from "@/components/IconButton";
@@ -21,12 +21,14 @@ type VolumeRowProps = {
   leading?: ReactNode;
   /** 名称右侧的额外按钮，如调试用的删除按钮。 */
   trailing?: ReactNode;
+  /** 所在的滚动列表，见 `VolumeSlider` 的同名参数。 */
+  scrollAreaRef?: RefObject<HTMLElement | null>;
   className?: string;
 };
 
 /**
  * 一行音量控制：名称、静音按钮、滑块、百分比。系统音量和应用音量共用。
- * 鼠标在整行任意位置滚动滚轮即可调节音量。
+ * 鼠标在整行任意位置滚动滚轮即可调节音量（所在列表可滚动时除外）。
  */
 export function VolumeRow({
   name,
@@ -38,6 +40,7 @@ export function VolumeRow({
   active,
   leading,
   trailing,
+  scrollAreaRef,
   className,
 }: VolumeRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
@@ -100,6 +103,7 @@ export function VolumeRow({
             onChange={onVolumeChange}
             onCommit={onVolumeCommit}
             wheelAreaRef={rowRef}
+            scrollAreaRef={scrollAreaRef}
           />
         </div>
       </div>
