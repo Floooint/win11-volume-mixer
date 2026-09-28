@@ -70,8 +70,11 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--wait --
 pnpm install          # 安装前端依赖
 pnpm tauri dev        # 启动开发模式（首次需编译 Rust 依赖，约 2–5 分钟）
 pnpm tauri build      # 构建 NSIS 安装包
+pnpm tauri build --no-bundle  # 只构建可直接双击运行的 exe（src-tauri/target/release/）
 pnpm typecheck        # 前端类型检查
 ```
+
+⚠️ 构建 release 版必须用 `pnpm tauri build`，**不要直接用 `cargo build --release`**：后者不会打包前端，程序运行时会去连开发服务器 `localhost:1420`，界面显示“拒绝连接”。构建前需先从托盘退出正在运行的程序，否则 exe 被占用，构建失败。
 
 在 `src-tauri/` 下执行：
 

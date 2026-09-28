@@ -58,11 +58,9 @@ fn cancel_release_timer<R: Runtime, M: Manager<R>>(manager: &M) {
 fn start_release_timer<R: Runtime>(window: &tauri::Window<R>) {
     cancel_release_timer(window);
     let seconds = window.state::<Config>().get().smart_release_seconds;
-    eprintln!("[window] 智能模式：开始计时 {seconds} 秒");
     let app = window.app_handle().clone();
     let timer = tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(u64::from(seconds))).await;
-        eprintln!("[window] 智能模式：计时到期");
         // 计时期间用户可能改了模式，到期时再确认一次。
         if policy(&app) == WindowPolicy::Smart
             && let Some(window) = main_window(&app)
