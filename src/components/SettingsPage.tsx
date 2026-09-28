@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  commands,
-  type Settings_Serialize as Settings,
-  type WindowPolicy_Serialize as WindowPolicy,
-} from "@/bindings";
+import type { WindowPolicy_Serialize as WindowPolicy } from "@/bindings";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
 import { IconButton } from "@/components/IconButton";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
+import { cn } from "@/lib/utils";
+import { useSettingsStore } from "@/stores/settings";
 
 const MODES: { value: WindowPolicy; label: string; hint: string }[] = [
   { value: "smart", label: "智能", hint: "隐藏一段时间后释放界面，兼顾速度与内存" },
@@ -50,25 +48,57 @@ function SecondsInput({ value, onCommit }: { value: number; onCommit: (seconds: 
   );
 }
 
+/** Win11 风格开关。 */
+function Switch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-5 w-10 shrink-0 items-center rounded-full border transition-colors",
+        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        checked ? "border-primary bg-primary" : "border-muted-foreground/60 bg-transparent",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute size-3 rounded-full transition-all duration-150 ease-out",
+          checked ? "left-5.5 bg-primary-foreground" : "left-0.75 bg-muted-foreground",
+        )}
+      />
+    </button>
+  );
+}
+
+/** 一项带开关的设置。 */
+function SwitchRow({
+  title,
+  hint,
+  checked,
+  onChange,
+}: {
+  title: string;
+  hint: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span>
+        <span className="block font-medium">{title}</span>
+        <span className="block text-xs text-muted-foreground">{hint}</span>
+      </span>
+      <Switch checked={checked} onChange={onChange} />
+    </div>
+  );
+}
+
 export function SettingsPage({ onBack }: { onBack: () => void }) {
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    commands.getSettings().then(setSettings);
-  }, []);
-
-  const save = async (next: Settings) => {
-    const previous = settings;
-    setSettings(next);
-    const result = await commands.setSettings(next);
-    if (result.status === "error") {
-      setSettings(previous);
-      setError(result.error.message);
-    } else {
-      setError(null);
-    }
-  };
+  const settings = useSettingsStore((s) => s.settings);
+  const error = useSettingsStore((s) => s.error);
+  const save = useSettingsStore((s) => s.save);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -99,7 +129,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       type="button"
                       role="radio"
                       aria-checked={selected}
-                      onClick={() => save({ ...settings, windowPolicy: mode.value })}
+                      onClick={() => save({ windowPolicy: mode.value })}
                       className={`rounded-md border px-3 py-2 text-left ${
                         selected ? "border-primary bg-primary/10" : "border-border hover:bg-accent"
                       }`}
@@ -122,13 +152,29 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   <span className="flex items-center gap-1.5">
                     <SecondsInput
                       value={settings.smartReleaseSeconds}
-                      onCommit={(seconds) => save({ ...settings, smartReleaseSeconds: seconds })}
+                      onCommit={(seconds) => save({ smartReleaseSeconds: seconds })}
                     />
                     秒
                   </span>
                 </label>
               )}
               {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+            </section>
+          )}
+          {settings && (
+            <section className="mx-3 mt-3 flex flex-col gap-3 rounded-xl border border-border bg-card p-3">
+              <SwitchRow
+                title="音量提示音"
+                hint="调节系统音量后播放提示音，声音大小即当前音量"
+                checked={settings.volumeFeedback}
+                onChange={(checked) => save({ volumeFeedback: checked })}
+              />
+              <SwitchRow
+                title="调试工具"
+                hint="在主界面显示“添加占位应用”按钮，用于测试多应用布局"
+                checked={settings.debugTools}
+                onChange={(checked) => save({ debugTools: checked })}
+              />
             </section>
           )}
         </div>

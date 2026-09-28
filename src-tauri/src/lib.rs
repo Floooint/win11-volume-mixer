@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod error;
 mod events;
+mod feedback;
 mod tray;
 mod window;
 
@@ -27,6 +28,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_app_mute,
             commands::window_ready,
             commands::fit_window_height,
+            commands::play_volume_feedback,
             commands::get_settings,
             commands::set_settings,
         ])
@@ -62,6 +64,7 @@ pub fn run() {
             window::show(app, None);
         }))
         .manage(window::WindowState::default())
+        .manage(feedback::Feedback::default())
         .invoke_handler(builder.invoke_handler())
         .on_window_event(window::handle_event)
         .setup(move |app| {

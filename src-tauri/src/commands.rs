@@ -5,6 +5,7 @@ use tauri::State;
 use crate::audio::{AudioService, AudioSnapshot, Command};
 use crate::config::{Config, Settings};
 use crate::error::AppResult;
+use crate::feedback::Feedback;
 
 /// 获取完整状态。窗口创建后调用一次，之后依靠事件增量更新。
 #[tauri::command]
@@ -60,6 +61,15 @@ pub async fn set_app_mute(
 #[specta::specta]
 pub fn window_ready(app: tauri::AppHandle) {
     crate::window::ready(&app);
+}
+
+/// 一次系统音量调节结束（松开滑块、滚轮停止）时调用，按设置播放提示音。
+#[tauri::command]
+#[specta::specta]
+pub fn play_volume_feedback(config: State<'_, Config>, feedback: State<'_, Feedback>) {
+    if config.get().volume_feedback {
+        feedback.play();
+    }
 }
 
 /// 前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。

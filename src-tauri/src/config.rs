@@ -37,6 +37,10 @@ pub struct Settings {
     pub window_policy: WindowPolicy,
     /// 智能模式下，窗口隐藏多少秒后释放界面。
     pub smart_release_seconds: u32,
+    /// 调节系统音量后播放提示音。
+    pub volume_feedback: bool,
+    /// 在主界面显示调试工具（添加占位应用）。
+    pub debug_tools: bool,
 }
 
 impl Default for Settings {
@@ -44,6 +48,8 @@ impl Default for Settings {
         Self {
             window_policy: WindowPolicy::default(),
             smart_release_seconds: DEFAULT_SMART_SECONDS,
+            volume_feedback: true,
+            debug_tools: false,
         }
     }
 }
@@ -136,6 +142,8 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.window_policy, WindowPolicy::Smart);
         assert_eq!(settings.smart_release_seconds, 300);
+        assert!(settings.volume_feedback, "默认开启提示音");
+        assert!(!settings.debug_tools, "默认关闭调试工具");
     }
 
     #[test]
@@ -149,10 +157,12 @@ mod tests {
         let settings = Settings {
             window_policy: WindowPolicy::Smart,
             smart_release_seconds: 60,
+            volume_feedback: false,
+            debug_tools: true,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r#"{"windowPolicy":"smart","smartReleaseSeconds":60}"#
+            r#"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true}"#
         );
     }
 

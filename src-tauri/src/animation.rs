@@ -1,17 +1,29 @@
-//! 窗口滑出动画：在后台线程逐帧移动窗口，结束后执行真正的隐藏。
+//! 窗口滑入 / 滑出动画：在后台线程逐帧移动窗口。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-/// 滑出动画时长。
-pub const DURATION: Duration = Duration::from_millis(200);
-
 /// 帧间隔（约 120 fps）。实际位置按经过的时间计算，线程调度抖动只影响平滑度，不影响总时长。
 const FRAME: Duration = Duration::from_millis(8);
 
-/// 缓动曲线 ease-in cubic，即 CSS `cubic-bezier(0.32, 0, 0.67, 0)`：
-/// 起步慢、逐渐加速，窗口像被“拉”出屏幕。
-const CURVE: CubicBezier = CubicBezier::new(0.32, 0.0, 0.67, 0.0);
+/// 一段动画：时长与缓动曲线。
+#[derive(Debug, Clone, Copy)]
+pub struct Motion {
+    pub duration: Duration,
+    pub curve: CubicBezier,
+}
+
+/// 进入：从下方滑入。ease-out cubic `cubic-bezier(0.33, 1, 0.68, 1)`，起步快、平稳停下。
+pub const ENTER: Motion = Motion {
+    duration: Duration::from_millis(50),
+    curve: CubicBezier::new(0.33, 1.0, 0.68, 1.0),
+};
+
+/// 退出：向下滑出。ease-in cubic `cubic-bezier(0.32, 0, 0.67, 0)`，起步慢、逐渐加速。
+pub const EXIT: Motion = Motion {
+    duration: Duration::from_millis(100),
+    curve: CubicBezier::new(0.32, 0.0, 0.67, 0.0),
+};
 
 /// CSS 同款三次贝塞尔缓动曲线，端点固定为 (0,0) 和 (1,1)。
 #[derive(Debug, Clone, Copy)]
@@ -63,9 +75,10 @@ impl Generation {
     }
 }
 
-/// 从 `from_y` 滑到 `to_y`，每帧调用 `move_to(y)`。
+/// 按 `motion` 从 `from_y` 移动到 `to_y`，每帧调用 `move_to(y)`。
 /// 返回 `true` 表示完整播放，`false` 表示中途被取消。
 pub fn slide(
+    motion: Motion,
     from_y: i32,
     to_y: i32,
     still_current: impl Fn() -> bool,
@@ -76,8 +89,8 @@ pub fn slide(
         if !still_current() {
             return false;
         }
-        let progress = start.elapsed().as_secs_f64() / DURATION.as_secs_f64();
-        let eased = CURVE.ease(progress);
+        let progress = start.elapsed().as_secs_f64() / motion.duration.as_secs_f64();
+        let eased = motion.curve.ease(progress);
         let y = from_y as f64 + (to_y - from_y) as f64 * eased;
         move_to(y.round() as i32);
         if progress >= 1.0 {
@@ -94,30 +107,52 @@ mod tests {
 
     #[test]
     fn 曲线端点为0和1() {
-        assert!(CURVE.ease(0.0).abs() < 1e-9);
-        assert!((CURVE.ease(1.0) - 1.0).abs() < 1e-9);
+        for motion in [ENTER, EXIT] {
+            assert!(motion.curve.ease(0.0).abs() < 1e-9);
+            assert!((motion.curve.ease(1.0) - 1.0).abs() < 1e-9);
+        }
     }
 
     #[test]
     fn 超出范围的进度被截断() {
-        assert!(CURVE.ease(-1.0).abs() < 1e-9);
-        assert!((CURVE.ease(2.0) - 1.0).abs() < 1e-9);
+        assert!(EXIT.curve.ease(-1.0).abs() < 1e-9);
+        assert!((EXIT.curve.ease(2.0) - 1.0).abs() < 1e-9);
     }
 
     #[test]
-    fn ease_in曲线前段慢于匀速且单调递增() {
+    fn 退出曲线先慢后快() {
         let mut previous = 0.0;
         for i in 1..=100 {
             let x = f64::from(i) / 100.0;
-            let y = CURVE.ease(x);
+            let y = EXIT.curve.ease(x);
             assert!(y >= previous, "x={x} 处不单调");
             if x < 1.0 {
                 assert!(y < x, "x={x} 处应慢于匀速");
             }
             previous = y;
         }
-        // 前半段时间只走完不到 15% 的路程。
-        assert!(CURVE.ease(0.5) < 0.15);
+        assert!(EXIT.curve.ease(0.5) < 0.15, "前半段只走完不到 15%");
+    }
+
+    #[test]
+    fn 进入曲线先快后慢() {
+        let mut previous = 0.0;
+        for i in 1..=100 {
+            let x = f64::from(i) / 100.0;
+            let y = ENTER.curve.ease(x);
+            assert!(y >= previous, "x={x} 处不单调");
+            if x < 1.0 {
+                assert!(y > x, "x={x} 处应快于匀速");
+            }
+            previous = y;
+        }
+        assert!(ENTER.curve.ease(0.5) > 0.85, "前半段已走完 85% 以上");
+    }
+
+    #[test]
+    fn 时长符合要求() {
+        assert_eq!(ENTER.duration, Duration::from_millis(50));
+        assert_eq!(EXIT.duration, Duration::from_millis(100));
     }
 
     #[test]
@@ -131,19 +166,27 @@ mod tests {
 
     #[test]
     fn 动画结束于目标位置() {
-        let positions = RefCell::new(Vec::new());
-        let completed = slide(100, 500, || true, |y| positions.borrow_mut().push(y));
-        assert!(completed);
-        let positions = positions.into_inner();
-        assert_eq!(positions.first(), Some(&100));
-        assert_eq!(positions.last(), Some(&500));
-        assert!(positions.windows(2).all(|w| w[0] <= w[1]), "位置应单调向下");
+        for (motion, from, to) in [(EXIT, 100, 500), (ENTER, 500, 100)] {
+            let positions = RefCell::new(Vec::new());
+            let completed = slide(
+                motion,
+                from,
+                to,
+                || true,
+                |y| positions.borrow_mut().push(y),
+            );
+            assert!(completed);
+            let positions = positions.into_inner();
+            assert_eq!(positions.first(), Some(&from));
+            assert_eq!(positions.last(), Some(&to));
+        }
     }
 
     #[test]
     fn 取消后立即停止() {
         let frames = RefCell::new(0);
         let completed = slide(
+            EXIT,
             0,
             100,
             || *frames.borrow() < 2,

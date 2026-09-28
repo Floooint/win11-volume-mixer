@@ -16,6 +16,8 @@ export const commands = {
 	windowReady: () => __TAURI_INVOKE<void>("window_ready"),
 	/**  前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。 */
 	fitWindowHeight: (contentHeight: number) => __TAURI_INVOKE<void>("fit_window_height", { contentHeight }),
+	/**  一次系统音量调节结束（松开滑块、滚轮停止）时调用，按设置播放提示音。 */
+	playVolumeFeedback: () => __TAURI_INVOKE<void>("play_volume_feedback"),
 	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings"),
 	/**  保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。 */
 	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),
@@ -92,12 +94,20 @@ export type Settings_Deserialize = {
 	windowPolicy?: WindowPolicy_Deserialize,
 	/**  智能模式下，窗口隐藏多少秒后释放界面。 */
 	smartReleaseSeconds?: number,
+	/**  调节系统音量后播放提示音。 */
+	volumeFeedback?: boolean,
+	/**  在主界面显示调试工具（添加占位应用）。 */
+	debugTools?: boolean,
 };
 
 export type Settings_Serialize = {
 	windowPolicy: WindowPolicy_Serialize,
 	/**  智能模式下，窗口隐藏多少秒后释放界面。 */
 	smartReleaseSeconds: number,
+	/**  调节系统音量后播放提示音。 */
+	volumeFeedback: boolean,
+	/**  在主界面显示调试工具（添加占位应用）。 */
+	debugTools: boolean,
 };
 
 export type VolumeState = {

@@ -45,7 +45,9 @@ export const useAudioStore = create<AudioState>((set, get) => {
   const applyApp = (appId: string, patch: Partial<VolumeState>) =>
     update((s) => ({
       ...s,
-      apps: s.apps.map((a) => (a.appId === appId ? { ...a, volume: { ...a.volume, ...patch } } : a)),
+      apps: s.apps.map((a) =>
+        a.appId === appId ? { ...a, volume: { ...a.volume, ...patch } } : a,
+      ),
     }));
 
   const applyUpsert = (app: AppAudio) =>

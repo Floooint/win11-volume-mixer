@@ -176,7 +176,33 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .iter()
         .find(|w| w.label == MAIN)
         .expect("tauri.conf.json 中缺少主窗口配置");
-    WebviewWindowBuilder::from_config(app, config)?.build()
+    let window = WebviewWindowBuilder::from_config(app, config)?.build()?;
+    disable_system_transitions(&window);
+    Ok(window)
+}
+
+/// 关闭 Windows 自带的窗口显示 / 隐藏过渡动画（淡入淡出、缩放），
+/// 否则它会叠加在自定义的滑入 / 滑出动画之后，出现“残影”。
+fn disable_system_transitions<R: Runtime>(window: &WebviewWindow<R>) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
+    use windows_core::BOOL;
+
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let disabled = BOOL::from(true);
+    // SAFETY: hwnd 来自刚创建的窗口；传入 BOOL 的地址和大小符合该属性的要求。
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            windows::Win32::Foundation::HWND(hwnd.0),
+            DWMWA_TRANSITIONS_FORCEDISABLED,
+            (&raw const disabled).cast(),
+            size_of::<BOOL>() as u32,
+        )
+    };
+    if let Err(e) = result {
+        eprintln!("[window] 关闭系统过渡动画失败：{e}");
+    }
 }
 
 /// 启动时调用：常驻和智能模式下预先创建窗口，首次打开也能立即显示。
@@ -240,14 +266,53 @@ pub fn ready<R: Runtime>(app: &AppHandle<R>) {
 
 fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
     let tray = remember_tray(window, tray);
-    if let Some(tray) = tray
-        && let Err(e) = move_near_tray(window, tray)
-    {
-        eprintln!("[window] 定位失败：{e}");
+    // 用计算出的目标位置，而不是移动后再读回：非主线程上 set_position 是异步的，读回可能是旧值。
+    let target = match tray.map(|tray| target_near_tray(window, tray)) {
+        Some(Ok(Some(target))) => Some(target),
+        Some(Err(e)) => {
+            eprintln!("[window] 定位失败：{e}");
+            None
+        }
+        _ => None,
     }
+    .or_else(|| window.outer_position().ok());
+    let Some(target) = target else {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    };
+    let offset = slide_distance(window);
+
+    // 先放到目标位置下方再显示，然后滑到目标位置。
+    let _ = window.set_position(PhysicalPosition::new(target.x, target.y + offset));
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
+
+    let generation = window.state::<WindowState>().animation.next();
+    let window = window.clone();
+    std::thread::spawn(move || {
+        let state = window.state::<WindowState>();
+        let completed = animation::slide(
+            animation::ENTER,
+            target.y + offset,
+            target.y,
+            || state.animation.is_current(generation),
+            |y| {
+                let _ = window.set_position(PhysicalPosition::new(target.x, y));
+            },
+        );
+        // 被新的动画取消时不修正位置，交给新动画处理。
+        if completed {
+            let _ = window.set_position(target);
+        }
+    });
+}
+
+/// 滑入的起始偏移：窗口高度的一小段，避免窗口从屏幕底部整段飞入。
+fn slide_distance<R: Runtime>(window: &WebviewWindow<R>) -> i32 {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    (24.0 * scale).round() as i32
 }
 
 /// 记录新的托盘位置；没有新位置时返回上次记录的位置。
@@ -272,6 +337,7 @@ fn hide<R: Runtime>(window: &tauri::Window<R>) {
     if state.hiding.swap(true, Ordering::SeqCst) {
         return;
     }
+    // 也会取消进行中的滑入动画。
     let generation = state.animation.next();
     let window = window.clone();
     // 动画逐帧 sleep，放在独立线程，不阻塞事件循环。
@@ -282,6 +348,7 @@ fn hide<R: Runtime>(window: &tauri::Window<R>) {
                 let bottom = monitor.position().y + monitor.size().height as i32;
                 let state = window.state::<WindowState>();
                 animation::slide(
+                    animation::EXIT,
                     origin.y,
                     bottom,
                     || state.animation.is_current(generation),
@@ -301,8 +368,13 @@ fn hide<R: Runtime>(window: &tauri::Window<R>) {
             return;
         }
         let destroyed = finish_hide(&window);
-        // 窗口已不可见，移回原位，下次显示时不会从屏幕外出现。
-        if !destroyed && let Some(origin) = origin {
+        // 没有托盘位置可用于下次定位时，把窗口移回原位，避免下次从屏幕外出现。
+        // 有托盘位置时不移动：下次打开会重新定位，也避免任何隐藏过渡在原位出现残影。
+        let has_tray = state.last_tray.lock().ok().is_some_and(|t| t.is_some());
+        if !destroyed
+            && !has_tray
+            && let Some(origin) = origin
+        {
             let _ = window.set_position(origin);
         }
         state.hiding.store(false, Ordering::SeqCst);
@@ -374,11 +446,22 @@ fn try_fit_height<R: Runtime>(window: &WebviewWindow<R>, content: f64) -> tauri:
 }
 
 fn move_near_tray<R: Runtime>(window: &WebviewWindow<R>, tray: Rect) -> tauri::Result<()> {
+    if let Some(target) = target_near_tray(window, tray)? {
+        window.set_position(target)?;
+    }
+    Ok(())
+}
+
+/// 计算窗口贴近托盘时的左上角位置；取不到显示器信息时返回 `None`。
+fn target_near_tray<R: Runtime>(
+    window: &WebviewWindow<R>,
+    tray: Rect,
+) -> tauri::Result<Option<PhysicalPosition<i32>>> {
     let Some(monitor) = window
         .monitor_from_point(tray.x + tray.width / 2.0, tray.y + tray.height / 2.0)?
         .or(window.primary_monitor()?)
     else {
-        return Ok(());
+        return Ok(None);
     };
     let size = window.outer_size()?;
     let to_rect = |pos: PhysicalPosition<i32>, width: u32, height: u32| Rect {
@@ -400,7 +483,10 @@ fn move_near_tray<R: Runtime>(window: &WebviewWindow<R>, tray: Rect) -> tauri::R
         to_rect(area.position, area.size.width, area.size.height),
         monitor.scale_factor(),
     );
-    window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))
+    Ok(Some(PhysicalPosition::new(
+        x.round() as i32,
+        y.round() as i32,
+    )))
 }
 
 /// 托盘左键点击：窗口可见则隐藏，否则在托盘附近显示。
