@@ -1,0 +1,43 @@
+//! 前后端共享的数据类型，由 tauri-specta 导出到 `src/bindings.ts`。
+//! 音量统一使用 `0.0..=1.0` 的标量，界面显示时换算为 0–100。
+
+use serde::{Deserialize, Serialize};
+use specta::Type;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeState {
+    pub volume: f32,
+    pub muted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub id: String,
+    pub name: String,
+    /// 设备的系统总音量。
+    pub master: VolumeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AppAudio {
+    pub app_id: String,
+    pub name: String,
+    /// `data:` URL，暂未实现图标提取，恒为 `None`。
+    pub icon: Option<String>,
+    pub volume: VolumeState,
+    /// 是否有会话正在播放。
+    pub active: bool,
+    pub session_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSnapshot {
+    /// 没有任何输出设备时为 `None`。
+    pub device: Option<DeviceInfo>,
+    /// 已按“活跃在前，再按名称”排序。
+    pub apps: Vec<AppAudio>,
+}
