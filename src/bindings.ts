@@ -12,6 +12,11 @@ export const commands = {
 	setMasterMute: (muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_master_mute", { muted })),
 	setAppVolume: (appId: string, volume: number) => typedError<null, AppError>(__TAURI_INVOKE("set_app_volume", { appId, volume })),
 	setAppMute: (appId: string, muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_app_mute", { appId, muted })),
+	/**  前端首次渲染完成。新建的窗口在此之后才显示，避免出现空白窗口。 */
+	windowReady: () => __TAURI_INVOKE<void>("window_ready"),
+	getSettings: () => __TAURI_INVOKE<Settings>("get_settings"),
+	/**  保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。 */
+	setSettings: (settings: Settings) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),
 };
 
 /** Events */
@@ -72,15 +77,28 @@ export type ErrorCode =
 /**  Windows 音频接口调用失败。 */
 "ComFailure" | 
 /**  音频线程未运行。 */
-"AudioThreadDown";
+"AudioThreadDown" | 
+/**  设置文件读写失败。 */
+"ConfigFailure";
 
 /**  系统总音量被外部修改。 */
 export type MasterChangedEvent = VolumeState;
+
+export type Settings = {
+	windowPolicy?: WindowPolicy,
+};
 
 export type VolumeState = {
 	volume: number,
 	muted: boolean,
 };
+
+/**  窗口隐藏时如何处理 WebView。实测数据见 docs/architecture.md“决策记录”。 */
+export type WindowPolicy = 
+/**  只隐藏窗口：打开约 20 ms，常驻内存约 195 MB。 */
+"keep" | 
+/**  销毁窗口与 WebView：打开约 0.55 秒，常驻内存约 18 MB。 */
+"destroy";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

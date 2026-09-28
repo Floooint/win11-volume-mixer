@@ -3,6 +3,7 @@
 use tauri::State;
 
 use crate::audio::{AudioService, AudioSnapshot, Command};
+use crate::config::{Config, Settings};
 use crate::error::AppResult;
 
 /// 获取完整状态。窗口创建后调用一次，之后依靠事件增量更新。
@@ -52,6 +53,26 @@ pub async fn set_app_mute(
     audio
         .request(|reply| Command::SetAppMute(app_id, muted, reply))
         .await
+}
+
+/// 前端首次渲染完成。新建的窗口在此之后才显示，避免出现空白窗口。
+#[tauri::command]
+#[specta::specta]
+pub fn window_ready(app: tauri::AppHandle) {
+    crate::window::ready(&app);
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_settings(config: State<'_, Config>) -> Settings {
+    config.get()
+}
+
+/// 保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。
+#[tauri::command]
+#[specta::specta]
+pub fn set_settings(config: State<'_, Config>, settings: Settings) -> AppResult<()> {
+    config.set(settings).map(|_| ())
 }
 
 /// Windows 要求标量音量在 0–1 之间，超出范围会返回 E_INVALIDARG。

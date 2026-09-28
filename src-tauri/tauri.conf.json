@@ -14,6 +14,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Win11 声音控制器",
         "width": 380,
         "height": 520,

@@ -13,6 +13,8 @@ pub enum ErrorCode {
     ComFailure,
     /// 音频线程未运行。
     AudioThreadDown,
+    /// 设置文件读写失败。
+    ConfigFailure,
 }
 
 #[derive(Debug, Clone, Serialize, Type, thiserror::Error)]

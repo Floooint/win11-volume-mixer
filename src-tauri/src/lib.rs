@@ -1,5 +1,6 @@
 mod audio;
 mod commands;
+mod config;
 mod error;
 mod events;
 mod tray;
@@ -23,6 +24,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_master_mute,
             commands::set_app_volume,
             commands::set_app_mute,
+            commands::window_ready,
+            commands::get_settings,
+            commands::set_settings,
         ])
         .events(collect_events![
             events::AudioSnapshotEvent,
@@ -55,27 +59,37 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             window::show(app, None);
         }))
-        .manage(window::HiddenAt::default())
+        .manage(window::WindowState::default())
         .invoke_handler(builder.invoke_handler())
         .on_window_event(window::handle_event)
         .setup(move |app| {
             builder.mount_events(app);
+
+            // 设置必须在创建窗口之前加载：窗口隐藏策略由它决定。
+            app.manage(config::Config::load(app.handle()));
 
             let handle = app.handle().clone();
             app.manage(AudioService::start(move |update| {
                 events::emit(&handle, update)
             }));
             tray::create(app)?;
+            window::init(app.handle())?;
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");
 
-    app.run(|app, event| {
-        if let RunEvent::Exit = event {
+    app.run(|app, event| match event {
+        // 销毁策略下关闭最后一个窗口会触发退出请求（code 为 None），程序应继续在托盘运行。
+        // 托盘菜单“退出”调用 `app.exit(0)`，code 为 Some，正常退出。
+        RunEvent::ExitRequested {
+            code: None, api, ..
+        } => api.prevent_exit(),
+        RunEvent::Exit => {
             // 在进程退出前注销 COM 回调并释放音频资源。
             app.state::<AudioService>().shutdown();
         }
+        _ => {}
     });
 }
 

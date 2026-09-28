@@ -1,9 +1,15 @@
 //! 主窗口：定位到托盘附近、显示 / 隐藏、失焦自动隐藏。
+//!
+//! 隐藏策略由设置项 [`WindowPolicy`] 决定：保留 WebView（打开快）或销毁 WebView（常驻内存低）。
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, PhysicalPosition, Runtime, WebviewWindow, WindowEvent};
+use tauri::{
+    AppHandle, Manager, PhysicalPosition, Runtime, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
+
+use crate::config::{Config, WindowPolicy};
 
 pub const MAIN: &str = "main";
 
@@ -14,9 +20,23 @@ const MARGIN: f64 = 12.0;
 /// 在这个时间窗口内的点击视为“关闭”，不再重新打开。
 const REOPEN_GUARD: Duration = Duration::from_millis(250);
 
-/// 最近一次因失焦而隐藏的时间。
+/// 窗口相关的全局状态。
 #[derive(Default)]
-pub struct HiddenAt(Mutex<Option<Instant>>);
+pub struct WindowState {
+    /// 最近一次因失焦而隐藏的时间。
+    hidden_at: Mutex<Option<Instant>>,
+    /// 正在创建的窗口：等前端首次渲染完成后再定位并显示，避免白屏闪烁。
+    pending: Mutex<Option<Pending>>,
+}
+
+struct Pending {
+    tray: Option<Rect>,
+    requested_at: Instant,
+}
+
+fn policy<R: Runtime, M: Manager<R>>(manager: &M) -> WindowPolicy {
+    manager.state::<Config>().get().window_policy
+}
 
 /// 矩形（物理像素）。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,19 +115,95 @@ fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(MAIN)
 }
 
+/// 按 `tauri.conf.json` 中的配置创建主窗口（初始隐藏）。
+fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == MAIN)
+        .expect("tauri.conf.json 中缺少主窗口配置");
+    WebviewWindowBuilder::from_config(app, config)?.build()
+}
+
+/// 启动时调用：保留策略下预先创建窗口，首次打开也能立即显示。
+pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let policy = policy(app);
+    eprintln!("[window] 隐藏策略：{policy:?}");
+    if policy == WindowPolicy::Keep {
+        create(app)?;
+    }
+    Ok(())
+}
+
 /// 在托盘图标附近显示窗口；`tray` 为 `None` 时（如重复启动）保持原位置。
 pub fn show<R: Runtime>(app: &AppHandle<R>, tray: Option<Rect>) {
-    let Some(window) = main_window(app) else {
-        return;
-    };
+    let requested_at = Instant::now();
+    match main_window(app) {
+        Some(window) => {
+            // 窗口正在创建、尚未渲染完成时，等 `ready` 统一显示。
+            let state = app.state::<WindowState>();
+            if let Ok(mut pending) = state.pending.lock()
+                && let Some(pending) = pending.as_mut()
+            {
+                pending.tray = tray.or(pending.tray);
+                return;
+            }
+            present(&window, tray);
+            eprintln!(
+                "[window] 打开耗时 {:?}（窗口已存在）",
+                requested_at.elapsed()
+            );
+        }
+        None => {
+            if let Ok(mut pending) = app.state::<WindowState>().pending.lock() {
+                *pending = Some(Pending { tray, requested_at });
+            }
+            if let Err(e) = create(app) {
+                eprintln!("[window] 创建窗口失败：{e}");
+            }
+        }
+    }
+}
+
+/// 前端首次渲染完成后调用。若窗口是为了打开而新建的，此时再显示。
+pub fn ready<R: Runtime>(app: &AppHandle<R>) {
+    let pending = app
+        .state::<WindowState>()
+        .pending
+        .lock()
+        .ok()
+        .and_then(|mut p| p.take());
+    if let (Some(pending), Some(window)) = (pending, main_window(app)) {
+        present(&window, pending.tray);
+        eprintln!(
+            "[window] 打开耗时 {:?}（新建窗口）",
+            pending.requested_at.elapsed()
+        );
+    }
+}
+
+fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
     if let Some(tray) = tray
-        && let Err(e) = move_near_tray(&window, tray)
+        && let Err(e) = move_near_tray(window, tray)
     {
         eprintln!("[window] 定位失败：{e}");
     }
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
+}
+
+fn hide<R: Runtime>(window: &tauri::Window<R>) {
+    match policy(window) {
+        WindowPolicy::Keep => {
+            let _ = window.hide();
+        }
+        WindowPolicy::Destroy => {
+            let _ = window.destroy();
+        }
+    }
 }
 
 fn move_near_tray<R: Runtime>(window: &WebviewWindow<R>, tray: Rect) -> tauri::Result<()> {
@@ -142,21 +238,18 @@ fn move_near_tray<R: Runtime>(window: &WebviewWindow<R>, tray: Rect) -> tauri::R
 
 /// 托盘左键点击：窗口可见则隐藏，否则在托盘附近显示。
 pub fn toggle<R: Runtime>(app: &AppHandle<R>, tray: Rect) {
-    let Some(window) = main_window(app) else {
-        return;
-    };
     let just_hidden = app
-        .state::<HiddenAt>()
-        .0
+        .state::<WindowState>()
+        .hidden_at
         .lock()
         .ok()
         .and_then(|mut t| t.take())
         .is_some_and(|t| t.elapsed() < REOPEN_GUARD);
 
-    if window.is_visible().unwrap_or(false) {
-        let _ = window.hide();
-    } else if !just_hidden {
-        show(app, Some(tray));
+    match main_window(app) {
+        Some(window) if window.is_visible().unwrap_or(false) => hide(&window.as_ref().window()),
+        _ if !just_hidden => show(app, Some(tray)),
+        _ => {}
     }
 }
 
@@ -166,15 +259,16 @@ pub fn handle_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) 
         return;
     }
     match event {
-        WindowEvent::Focused(false) => {
-            if let Ok(mut t) = window.state::<HiddenAt>().0.lock() {
+        // 新建窗口在渲染完成前不可见，此时的失焦事件忽略。
+        WindowEvent::Focused(false) if window.is_visible().unwrap_or(false) => {
+            if let Ok(mut t) = window.state::<WindowState>().hidden_at.lock() {
                 *t = Some(Instant::now());
             }
-            let _ = window.hide();
+            hide(window);
         }
         WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            let _ = window.hide();
+            hide(window);
         }
         _ => {}
     }
