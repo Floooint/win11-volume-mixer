@@ -66,17 +66,11 @@ function AppItem({
   return (
     <li
       className={cn(
-        "relative rounded-lg px-2 py-2 transition-colors",
-        // 正在发声：浅色底 + 左侧强调条，一眼就能找到。
+        "rounded-lg px-2 py-2 transition-colors",
+        // 正在发声：浅色底，一眼就能找到。
         app.active ? "bg-primary/7 hover:bg-primary/11" : "hover:bg-accent/60",
       )}
     >
-      {app.active && (
-        <span
-          aria-hidden
-          className="absolute top-2.5 bottom-2.5 left-0 w-0.75 rounded-full bg-primary"
-        />
-      )}
       <VolumeRow
         name={app.name}
         detail={
