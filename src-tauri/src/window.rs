@@ -57,6 +57,10 @@ fn policy<R: Runtime, M: Manager<R>>(manager: &M) -> WindowPolicy {
     manager.state::<Config>().get().window_policy
 }
 
+fn fps<R: Runtime, M: Manager<R>>(manager: &M) -> u32 {
+    manager.state::<Config>().get().animation_fps
+}
+
 fn cancel_release_timer<R: Runtime, M: Manager<R>>(manager: &M) {
     let timer = manager
         .state::<WindowState>()
@@ -295,6 +299,7 @@ fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
         let state = window.state::<WindowState>();
         let completed = animation::slide(
             animation::ENTER,
+            fps(&window),
             target.y + offset,
             target.y,
             || state.animation.is_current(generation),
@@ -349,6 +354,7 @@ fn hide<R: Runtime>(window: &tauri::Window<R>) {
                 let state = window.state::<WindowState>();
                 animation::slide(
                     animation::EXIT,
+                    fps(&window),
                     origin.y,
                     bottom,
                     || state.animation.is_current(generation),

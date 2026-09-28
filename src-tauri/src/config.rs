@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::animation::FPS_RANGE;
 use crate::error::{AppError, AppResult, ErrorCode};
 
 const FILE_NAME: &str = "settings.json";
@@ -15,6 +16,7 @@ const FILE_NAME: &str = "settings.json";
 /// “智能”模式释放界面前等待的秒数范围。
 pub const SMART_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
 const DEFAULT_SMART_SECONDS: u32 = 300;
+const DEFAULT_FPS: u32 = 90;
 
 /// 窗口隐藏后的运行模式。实测数据见 docs/architecture.md“决策记录”。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -41,6 +43,8 @@ pub struct Settings {
     pub volume_feedback: bool,
     /// 在主界面显示调试工具（添加占位应用）。
     pub debug_tools: bool,
+    /// 窗口滑入 / 滑出动画的帧率（帧 / 秒）。
+    pub animation_fps: u32,
 }
 
 impl Default for Settings {
@@ -50,6 +54,7 @@ impl Default for Settings {
             smart_release_seconds: DEFAULT_SMART_SECONDS,
             volume_feedback: true,
             debug_tools: false,
+            animation_fps: DEFAULT_FPS,
         }
     }
 }
@@ -60,6 +65,9 @@ impl Settings {
         self.smart_release_seconds = self
             .smart_release_seconds
             .clamp(*SMART_SECONDS_RANGE.start(), *SMART_SECONDS_RANGE.end());
+        self.animation_fps = self
+            .animation_fps
+            .clamp(*FPS_RANGE.start(), *FPS_RANGE.end());
         self
     }
 }
@@ -144,6 +152,7 @@ mod tests {
         assert_eq!(settings.smart_release_seconds, 300);
         assert!(settings.volume_feedback, "默认开启提示音");
         assert!(!settings.debug_tools, "默认关闭调试工具");
+        assert_eq!(settings.animation_fps, 90, "默认 90 帧");
     }
 
     #[test]
@@ -159,10 +168,11 @@ mod tests {
             smart_release_seconds: 60,
             volume_feedback: false,
             debug_tools: true,
+            animation_fps: 120,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r#"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true}"#
+            r#"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120}"#
         );
     }
 
@@ -186,5 +196,16 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(too_large.normalized().smart_release_seconds, 600);
+    }
+
+    #[test]
+    fn 帧率被限制在30到240之间() {
+        let settings = |animation_fps| Settings {
+            animation_fps,
+            ..Settings::default()
+        };
+        assert_eq!(settings(5).normalized().animation_fps, 30);
+        assert_eq!(settings(999).normalized().animation_fps, 240);
+        assert_eq!(settings(144).normalized().animation_fps, 144);
     }
 }

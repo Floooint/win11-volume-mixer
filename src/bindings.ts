@@ -98,6 +98,8 @@ export type Settings_Deserialize = {
 	volumeFeedback?: boolean,
 	/**  在主界面显示调试工具（添加占位应用）。 */
 	debugTools?: boolean,
+	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。 */
+	animationFps?: number,
 };
 
 export type Settings_Serialize = {
@@ -108,6 +110,8 @@ export type Settings_Serialize = {
 	volumeFeedback: boolean,
 	/**  在主界面显示调试工具（添加占位应用）。 */
 	debugTools: boolean,
+	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。 */
+	animationFps: number,
 };
 
 export type VolumeState = {

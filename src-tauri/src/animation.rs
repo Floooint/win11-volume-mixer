@@ -3,8 +3,14 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-/// 帧间隔（约 120 fps）。实际位置按经过的时间计算，线程调度抖动只影响平滑度，不影响总时长。
-const FRAME: Duration = Duration::from_millis(8);
+/// 动画帧率范围（帧 / 秒），与设置项 `animation_fps` 对应。
+pub const FPS_RANGE: std::ops::RangeInclusive<u32> = 30..=240;
+
+/// 每帧间隔。实际位置按经过的时间计算，线程调度抖动只影响平滑度，不影响总时长。
+fn frame_interval(fps: u32) -> Duration {
+    let fps = fps.clamp(*FPS_RANGE.start(), *FPS_RANGE.end());
+    Duration::from_secs_f64(1.0 / f64::from(fps))
+}
 
 /// 一段动画：时长与缓动曲线。
 #[derive(Debug, Clone, Copy)]
@@ -75,15 +81,17 @@ impl Generation {
     }
 }
 
-/// 按 `motion` 从 `from_y` 移动到 `to_y`，每帧调用 `move_to(y)`。
+/// 按 `motion` 以 `fps` 帧率从 `from_y` 移动到 `to_y`，每帧调用 `move_to(y)`。
 /// 返回 `true` 表示完整播放，`false` 表示中途被取消。
 pub fn slide(
     motion: Motion,
+    fps: u32,
     from_y: i32,
     to_y: i32,
     still_current: impl Fn() -> bool,
     move_to: impl Fn(i32),
 ) -> bool {
+    let frame = frame_interval(fps);
     let start = Instant::now();
     loop {
         if !still_current() {
@@ -96,7 +104,7 @@ pub fn slide(
         if progress >= 1.0 {
             return true;
         }
-        std::thread::sleep(FRAME);
+        std::thread::sleep(frame);
     }
 }
 
@@ -170,6 +178,7 @@ mod tests {
             let positions = RefCell::new(Vec::new());
             let completed = slide(
                 motion,
+                90,
                 from,
                 to,
                 || true,
@@ -187,6 +196,7 @@ mod tests {
         let frames = RefCell::new(0);
         let completed = slide(
             EXIT,
+            90,
             0,
             100,
             || *frames.borrow() < 2,
@@ -194,6 +204,28 @@ mod tests {
         );
         assert!(!completed);
         assert_eq!(*frames.borrow(), 2);
+    }
+
+    #[test]
+    fn 帧间隔随帧率变化并被限制在范围内() {
+        assert_eq!(frame_interval(90), Duration::from_secs_f64(1.0 / 90.0));
+        assert_eq!(frame_interval(1), frame_interval(30), "低于下限按 30 帧");
+        assert_eq!(
+            frame_interval(1000),
+            frame_interval(240),
+            "高于上限按 240 帧"
+        );
+    }
+
+    #[test]
+    fn 帧率越高帧数越多() {
+        let count = |fps| {
+            let frames = RefCell::new(0);
+            slide(EXIT, fps, 0, 100, || true, |_| *frames.borrow_mut() += 1);
+            frames.into_inner()
+        };
+        let (low, high) = (count(30), count(240));
+        assert!(high > low, "240 帧（{high}）应多于 30 帧（{low}）");
     }
 
     #[test]

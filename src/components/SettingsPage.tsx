@@ -16,29 +16,45 @@ const MODES: { value: WindowPolicy; label: string; hint: string }[] = [
 const MIN_SECONDS = 10;
 const MAX_SECONDS = 600;
 
-function clampSeconds(value: number) {
-  return Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Math.round(value)));
-}
+/** 与后端 `animation::FPS_RANGE` 保持一致。 */
+const MIN_FPS = 30;
+const MAX_FPS = 240;
+const FPS_PRESETS = [60, 90, 120, 144];
 
-/** 智能模式的等待时间。输入过程中允许临时的非法值，失焦或回车时再修正并保存。 */
-function SecondsInput({ value, onCommit }: { value: number; onCommit: (seconds: number) => void }) {
+/** 整数输入框。输入过程中允许临时的非法值，失焦或回车时再修正到范围内并保存。 */
+function NumberInput({
+  value,
+  min,
+  max,
+  step,
+  label,
+  onCommit,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  label: string;
+  onCommit: (value: number) => void;
+}) {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => setDraft(String(value)), [value]);
 
   const commit = () => {
     const parsed = Number(draft);
-    const seconds = Number.isFinite(parsed) ? clampSeconds(parsed) : value;
-    setDraft(String(seconds));
-    if (seconds !== value) onCommit(seconds);
+    const next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : value;
+    setDraft(String(next));
+    if (next !== value) onCommit(next);
   };
 
   return (
     <input
       type="number"
       inputMode="numeric"
-      min={MIN_SECONDS}
-      max={MAX_SECONDS}
-      step={10}
+      aria-label={label}
+      min={min}
+      max={max}
+      step={step}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
@@ -150,8 +166,12 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     </span>
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <SecondsInput
+                    <NumberInput
+                      label="释放等待时间（秒）"
                       value={settings.smartReleaseSeconds}
+                      min={MIN_SECONDS}
+                      max={MAX_SECONDS}
+                      step={10}
                       onCommit={(seconds) => save({ smartReleaseSeconds: seconds })}
                     />
                     秒
@@ -169,6 +189,43 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 checked={settings.volumeFeedback}
                 onChange={(checked) => save({ volumeFeedback: checked })}
               />
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  <span className="block font-medium">动画帧率</span>
+                  <span className="block text-xs text-muted-foreground">
+                    窗口滑入 / 滑出的流畅度，{MIN_FPS}–{MAX_FPS} 帧
+                  </span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <NumberInput
+                    label="动画帧率（帧 / 秒）"
+                    value={settings.animationFps}
+                    min={MIN_FPS}
+                    max={MAX_FPS}
+                    step={1}
+                    onCommit={(fps) => save({ animationFps: fps })}
+                  />
+                  帧
+                </span>
+              </div>
+              <div className="-mt-1.5 flex justify-end gap-1" role="group" aria-label="常用帧率">
+                {FPS_PRESETS.map((fps) => (
+                  <button
+                    key={fps}
+                    type="button"
+                    onClick={() => save({ animationFps: fps })}
+                    aria-pressed={settings.animationFps === fps}
+                    className={cn(
+                      "rounded-md border px-2 py-0.5 text-xs tabular-nums transition-colors",
+                      settings.animationFps === fps
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {fps}
+                  </button>
+                ))}
+              </div>
               <SwitchRow
                 title="调试工具"
                 hint="在主界面显示“添加占位应用”按钮，用于测试多应用布局"
