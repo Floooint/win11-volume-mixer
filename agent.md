@@ -28,11 +28,11 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--wait --
 - 安装 Rust 后，需**完全退出 VS Code 再重新打开**，`~/.cargo/bin` 才会出现在终端的 PATH 中。若仍找不到 `cargo`，说明资源管理器未收到环境变量更新通知，注销并重新登录 Windows 即可（或广播一次 `WM_SETTINGCHANGE`）。可用 `Win + R` → `cmd` → `where cargo` 检查。
 - Node 版本管理工具（fnm / Volta）可选，会读取 `.node-version` 自动切换。
 
-项目骨架创建后：
+版本固定方式：
 
-- 在 `package.json` 中用 `packageManager` 字段固定 pnpm 版本。
-- 在 `src-tauri/rust-toolchain.toml` 中固定 Rust 版本。
-- 更新上表为实际固定的版本。
+- Node：根目录 `.node-version`。
+- pnpm：`package.json` 的 `packageManager` 字段。
+- Rust：根目录 `rust-toolchain.toml`（首次在项目内运行 `cargo` 时，rustup 会自动下载该版本）。
 
 ## 依赖管理
 
@@ -64,14 +64,40 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--wait --
 
 ## 开发命令
 
-骨架创建后补充，预计包括：
+在项目根目录执行：
 
 ```text
-pnpm install          # 安装依赖
-pnpm tauri dev        # 启动开发模式
-pnpm tauri build      # 构建安装包
-pnpm lint             # 前端检查
-cargo fmt / clippy / test（在 src-tauri 下）
+pnpm install          # 安装前端依赖
+pnpm tauri dev        # 启动开发模式（首次需编译 Rust 依赖，约 2–5 分钟）
+pnpm tauri build      # 构建 NSIS 安装包
+pnpm typecheck        # 前端类型检查
+```
+
+在 `src-tauri/` 下执行：
+
+```text
+cargo fmt
+cargo clippy
+cargo test
+```
+
+添加 UI 组件（组件源码会复制到 `src/components/ui/`）：
+
+```text
+pnpm dlx shadcn@latest add @animate-ui/<组件名>   # Animate UI 组件
+pnpm dlx shadcn@latest add <组件名>               # shadcn/ui 组件
+```
+
+## 目录结构
+
+```text
+src/                  React 前端
+  components/ui/      通过 shadcn CLI 添加的组件（可修改）
+  lib/utils.ts        cn() 工具函数
+  index.css           Tailwind 与主题变量
+src-tauri/            Tauri / Rust 后端
+prototypes/audio-cli/ 阶段 1 音频原型（参考实现，不参与打包）
+docs/                 项目文档
 ```
 
 ## 验证流程
