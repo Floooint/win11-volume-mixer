@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
@@ -27,6 +27,7 @@ thiserror = "2.0.21"
 windows-core = "0.62"
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Devices_FunctionDiscovery", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_Shell_PropertiesSystem"] }
 tokio = { version = "1.53.1", default-features = false, features = ["sync"] }
+tauri-plugin-single-instance = "2"
 
 # 体积优化，见 https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

@@ -17,7 +17,13 @@
         "title": "Win11 声音控制器",
         "width": 380,
         "height": 520,
-        "resizable": false
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "visible": false
       }
     ],
     "security": {

@@ -2,6 +2,8 @@ mod audio;
 mod commands;
 mod error;
 mod events;
+mod tray;
+mod window;
 
 use tauri::{Manager, RunEvent};
 use tauri_specta::{Builder, collect_commands, collect_events};
@@ -49,7 +51,13 @@ pub fn run() {
     export_bindings();
 
     let app = tauri::Builder::default()
+        // 必须第一个注册：重复启动时唤起已有窗口，新进程随即退出。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            window::show(app, None);
+        }))
+        .manage(window::HiddenAt::default())
         .invoke_handler(builder.invoke_handler())
+        .on_window_event(window::handle_event)
         .setup(move |app| {
             builder.mount_events(app);
 
@@ -57,6 +65,7 @@ pub fn run() {
             app.manage(AudioService::start(move |update| {
                 events::emit(&handle, update)
             }));
+            tray::create(app)?;
             Ok(())
         })
         .build(tauri::generate_context!())
