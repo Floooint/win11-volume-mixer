@@ -29,6 +29,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::window_ready,
             commands::fit_window_height,
             commands::play_volume_feedback,
+            commands::get_refresh_rate,
             commands::get_settings,
             commands::set_settings,
         ])

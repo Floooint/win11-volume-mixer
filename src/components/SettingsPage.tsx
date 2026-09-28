@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { WindowPolicy_Serialize as WindowPolicy } from "@/bindings";
+import { commands, type WindowPolicy_Serialize as WindowPolicy } from "@/bindings";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
 import { IconButton } from "@/components/IconButton";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
@@ -19,31 +19,43 @@ const MAX_SECONDS = 600;
 /** 与后端 `animation::FPS_RANGE` 保持一致。 */
 const MIN_FPS = 30;
 const MAX_FPS = 240;
-const FPS_PRESETS = [60, 90, 120, 144];
 
-/** 整数输入框。输入过程中允许临时的非法值，失焦或回车时再修正到范围内并保存。 */
+/**
+ * 整数输入框。输入过程中允许临时的非法值，失焦或回车时再修正到范围内并保存。
+ * `optional` 时允许清空：清空表示使用默认值（`placeholder` 显示默认值）。
+ */
 function NumberInput({
   value,
   min,
   max,
   step,
   label,
+  placeholder,
+  optional = false,
   onCommit,
 }: {
-  value: number;
+  value: number | null;
   min: number;
   max: number;
   step: number;
   label: string;
-  onCommit: (value: number) => void;
+  placeholder?: string;
+  optional?: boolean;
+  onCommit: (value: number | null) => void;
 }) {
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => setDraft(String(value)), [value]);
+  const text = (v: number | null) => (v === null ? "" : String(v));
+  const [draft, setDraft] = useState(text(value));
+  useEffect(() => setDraft(text(value)), [value]);
 
   const commit = () => {
-    const parsed = Number(draft);
-    const next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : value;
-    setDraft(String(next));
+    let next: number | null;
+    if (draft.trim() === "" && optional) {
+      next = null;
+    } else {
+      const parsed = Number(draft);
+      next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : value;
+    }
+    setDraft(text(next));
     if (next !== value) onCommit(next);
   };
 
@@ -56,10 +68,11 @@ function NumberInput({
       max={max}
       step={step}
       value={draft}
+      placeholder={placeholder}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-      className="w-20 rounded-md border border-input bg-background px-2 py-1 text-right text-foreground"
+      className="w-20 rounded-md border border-input bg-background px-2 py-1 text-right text-foreground placeholder:text-muted-foreground"
     />
   );
 }
@@ -115,6 +128,10 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const settings = useSettingsStore((s) => s.settings);
   const error = useSettingsStore((s) => s.error);
   const save = useSettingsStore((s) => s.save);
+  const [refreshRate, setRefreshRate] = useState<number | null>(null);
+  useEffect(() => {
+    commands.getRefreshRate().then(setRefreshRate);
+  }, []);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -172,7 +189,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       min={MIN_SECONDS}
                       max={MAX_SECONDS}
                       step={10}
-                      onCommit={(seconds) => save({ smartReleaseSeconds: seconds })}
+                      onCommit={(seconds) =>
+                        seconds !== null && save({ smartReleaseSeconds: seconds })
+                      }
                     />
                     秒
                   </span>
@@ -193,7 +212,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 <span>
                   <span className="block font-medium">动画帧率</span>
                   <span className="block text-xs text-muted-foreground">
-                    窗口滑入 / 滑出的流畅度，{MIN_FPS}–{MAX_FPS} 帧
+                    {settings.animationFps === null
+                      ? `跟随显示器刷新率${refreshRate ? `（${refreshRate} Hz）` : ""}`
+                      : `${MIN_FPS}–${MAX_FPS} 帧，清空则跟随显示器`}
                   </span>
                 </span>
                 <span className="flex items-center gap-1.5">
@@ -203,28 +224,12 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     min={MIN_FPS}
                     max={MAX_FPS}
                     step={1}
+                    optional
+                    placeholder={refreshRate ? String(refreshRate) : "自动"}
                     onCommit={(fps) => save({ animationFps: fps })}
                   />
                   帧
                 </span>
-              </div>
-              <div className="-mt-1.5 flex justify-end gap-1" role="group" aria-label="常用帧率">
-                {FPS_PRESETS.map((fps) => (
-                  <button
-                    key={fps}
-                    type="button"
-                    onClick={() => save({ animationFps: fps })}
-                    aria-pressed={settings.animationFps === fps}
-                    className={cn(
-                      "rounded-md border px-2 py-0.5 text-xs tabular-nums transition-colors",
-                      settings.animationFps === fps
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border text-muted-foreground hover:bg-accent",
-                    )}
-                  >
-                    {fps}
-                  </button>
-                ))}
               </div>
               <SwitchRow
                 title="调试工具"

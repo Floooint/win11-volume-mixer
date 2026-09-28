@@ -21,6 +21,9 @@ pub const MAIN: &str = "main";
 /// 窗口与任务栏之间的间距（物理像素，按 DPI 缩放前为 12 px）。
 const MARGIN: f64 = 12.0;
 
+/// 窗口宽度（逻辑像素），与 `tauri.conf.json` 中的 `width` 一致。
+const WIDTH: f64 = 380.0;
+
 /// 窗口最小高度（逻辑像素）。
 const MIN_HEIGHT: f64 = 160.0;
 
@@ -57,8 +60,14 @@ fn policy<R: Runtime, M: Manager<R>>(manager: &M) -> WindowPolicy {
     manager.state::<Config>().get().window_policy
 }
 
-fn fps<R: Runtime, M: Manager<R>>(manager: &M) -> u32 {
-    manager.state::<Config>().get().animation_fps
+/// 动画帧率：用户设置优先，否则跟随窗口所在显示器的刷新率。
+fn fps<R: Runtime>(window: &tauri::Window<R>) -> u32 {
+    let configured = window.state::<Config>().get().animation_fps;
+    let refresh_rate = configured.is_none().then(|| {
+        let monitor = window.current_monitor().ok().flatten();
+        animation::display_refresh_rate(monitor.as_ref().and_then(|m| m.name()).map(String::as_str))
+    });
+    animation::effective_fps(configured, refresh_rate.flatten())
 }
 
 fn cancel_release_timer<R: Runtime, M: Manager<R>>(manager: &M) {
@@ -299,7 +308,7 @@ fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
         let state = window.state::<WindowState>();
         let completed = animation::slide(
             animation::ENTER,
-            fps(&window),
+            fps(&window.as_ref().window()),
             target.y + offset,
             target.y,
             || state.animation.is_current(generation),
@@ -434,11 +443,14 @@ fn try_fit_height<R: Runtime>(window: &WebviewWindow<R>, content: f64) -> tauri:
         monitor.size().height.into(),
         monitor.work_area().size.height.into(),
     );
-    let size = window.outer_size()?;
-    if size.height == height {
+    // `set_size` 设置的是内容区尺寸，而 `outer_size` 含边框。若用读回的外框宽度去设置，
+    // 每次调整都会多出边框宽度，窗口越来越宽。因此宽度始终使用配置中的固定值。
+    let width = (WIDTH * monitor.scale_factor()).round() as u32;
+    let size = window.inner_size()?;
+    if size.height == height && size.width == width {
         return Ok(());
     }
-    window.set_size(PhysicalSize::new(size.width, height))?;
+    window.set_size(PhysicalSize::new(width, height))?;
 
     // 可见时立即重新定位；隐藏时由下次显示负责定位。滑出动画进行中不打断。
     let state = window.state::<WindowState>();

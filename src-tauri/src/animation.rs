@@ -6,6 +6,35 @@ use std::time::{Duration, Instant};
 /// 动画帧率范围（帧 / 秒），与设置项 `animation_fps` 对应。
 pub const FPS_RANGE: std::ops::RangeInclusive<u32> = 30..=240;
 
+/// 读取不到显示器刷新率时使用的帧率。
+const FALLBACK_FPS: u32 = 60;
+
+/// 查询显示器当前刷新率（Hz）。`device` 为显示器设备名（如 `\\.\DISPLAY1`），
+/// `None` 表示主显示器。读取失败或系统返回“默认值”时返回 `None`。
+pub fn display_refresh_rate(device: Option<&str>) -> Option<u32> {
+    use windows::Win32::Graphics::Gdi::{DEVMODEW, ENUM_CURRENT_SETTINGS, EnumDisplaySettingsW};
+    use windows_core::{HSTRING, PCWSTR};
+
+    let name = device.map(HSTRING::from);
+    let name_ptr = name.as_ref().map_or(PCWSTR::null(), |n| PCWSTR(n.as_ptr()));
+    let mut mode = DEVMODEW {
+        dmSize: size_of::<DEVMODEW>() as u16,
+        ..Default::default()
+    };
+    // SAFETY: mode 已按要求设置 dmSize；name_ptr 为空或指向存活到调用结束的 HSTRING。
+    let ok = unsafe { EnumDisplaySettingsW(name_ptr, ENUM_CURRENT_SETTINGS, &mut mode) };
+    // 0 或 1 表示“硬件默认刷新率”，不是真实值。
+    (ok.as_bool() && mode.dmDisplayFrequency > 1).then_some(mode.dmDisplayFrequency)
+}
+
+/// 实际使用的帧率：用户设置了就用设置值，否则跟随显示器刷新率。
+pub fn effective_fps(configured: Option<u32>, refresh_rate: Option<u32>) -> u32 {
+    configured
+        .or(refresh_rate)
+        .unwrap_or(FALLBACK_FPS)
+        .clamp(*FPS_RANGE.start(), *FPS_RANGE.end())
+}
+
 /// 每帧间隔。实际位置按经过的时间计算，线程调度抖动只影响平滑度，不影响总时长。
 fn frame_interval(fps: u32) -> Duration {
     let fps = fps.clamp(*FPS_RANGE.start(), *FPS_RANGE.end());
@@ -204,6 +233,36 @@ mod tests {
         );
         assert!(!completed);
         assert_eq!(*frames.borrow(), 2);
+    }
+
+    #[test]
+    fn 未设置帧率时跟随显示器刷新率() {
+        assert_eq!(effective_fps(None, Some(144)), 144);
+        assert_eq!(effective_fps(None, Some(60)), 60);
+    }
+
+    #[test]
+    fn 设置了帧率时优先使用设置值() {
+        assert_eq!(effective_fps(Some(90), Some(144)), 90);
+    }
+
+    #[test]
+    fn 读不到刷新率时使用60帧() {
+        assert_eq!(effective_fps(None, None), 60);
+    }
+
+    #[test]
+    fn 实际帧率被限制在范围内() {
+        assert_eq!(effective_fps(None, Some(360)), 240, "360Hz 显示器按 240 帧");
+        assert_eq!(effective_fps(None, Some(24)), 30);
+    }
+
+    #[test]
+    fn 能读取主显示器刷新率() {
+        // 在有显示器的开发机上运行；读取成功时值应在合理范围内。
+        if let Some(hz) = display_refresh_rate(None) {
+            assert!((20..=1000).contains(&hz), "刷新率 {hz} 不合理");
+        }
     }
 
     #[test]

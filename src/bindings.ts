@@ -18,6 +18,8 @@ export const commands = {
 	fitWindowHeight: (contentHeight: number) => __TAURI_INVOKE<void>("fit_window_height", { contentHeight }),
 	/**  一次系统音量调节结束（松开滑块、滚轮停止）时调用，按设置播放提示音。 */
 	playVolumeFeedback: () => __TAURI_INVOKE<void>("play_volume_feedback"),
+	/**  窗口所在显示器的刷新率（Hz），读取失败时为 `None`。设置页用它显示默认帧率。 */
+	getRefreshRate: () => __TAURI_INVOKE<number | null>("get_refresh_rate"),
 	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings"),
 	/**  保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。 */
 	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),
@@ -98,8 +100,8 @@ export type Settings_Deserialize = {
 	volumeFeedback?: boolean,
 	/**  在主界面显示调试工具（添加占位应用）。 */
 	debugTools?: boolean,
-	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。 */
-	animationFps?: number,
+	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。 */
+	animationFps?: number | null,
 };
 
 export type Settings_Serialize = {
@@ -110,8 +112,8 @@ export type Settings_Serialize = {
 	volumeFeedback: boolean,
 	/**  在主界面显示调试工具（添加占位应用）。 */
 	debugTools: boolean,
-	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。 */
-	animationFps: number,
+	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。 */
+	animationFps: number | null,
 };
 
 export type VolumeState = {

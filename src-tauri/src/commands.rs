@@ -72,6 +72,16 @@ pub fn play_volume_feedback(config: State<'_, Config>, feedback: State<'_, Feedb
     }
 }
 
+/// 窗口所在显示器的刷新率（Hz），读取失败时为 `None`。设置页用它显示默认帧率。
+#[tauri::command]
+#[specta::specta]
+pub fn get_refresh_rate(window: tauri::WebviewWindow) -> Option<u32> {
+    let monitor = window.current_monitor().ok().flatten();
+    crate::animation::display_refresh_rate(
+        monitor.as_ref().and_then(|m| m.name()).map(String::as_str),
+    )
+}
+
 /// 前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。
 #[tauri::command]
 #[specta::specta]
