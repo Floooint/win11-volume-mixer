@@ -1,0 +1,14 @@
+# 仓库内统一使用 LF，检出时由 Git 按平台处理
+* text=auto eol=lf
+
+# Windows 脚本保留 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制资源
+*.png binary
+*.ico binary
+*.icns binary
+*.jpg binary
+*.woff2 binary

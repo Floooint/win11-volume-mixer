@@ -1,0 +1,25 @@
+# 依赖
+node_modules/
+
+# 前端构建产物
+dist/
+*.tsbuildinfo
+
+# Rust / Tauri 构建产物
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# 日志与本地文件
+*.log
+.env
+.env.*
+!.env.example
+
+# 编辑器与系统文件
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
