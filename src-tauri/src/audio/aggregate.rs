@@ -19,7 +19,7 @@ pub fn aggregate<'a>(sessions: impl IntoIterator<Item = SessionData<'a>>) -> Vec
         let app = apps.entry(&session.app.app_id).or_insert_with(|| AppAudio {
             app_id: session.app.app_id.clone(),
             name: session.app.name.clone(),
-            icon: None,
+            icon: session.app.icon.clone(),
             volume: VolumeState {
                 volume: 0.0,
                 muted: true,
@@ -105,6 +105,7 @@ mod tests {
         AppInfo {
             app_id: app_id.into(),
             name: name.into(),
+            icon: None,
         }
     }
 

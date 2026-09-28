@@ -4347,6 +4347,8 @@ dependencies = [
 name = "win11-volume-mixer"
 version = "0.1.0"
 dependencies = [
+ "percent-encoding",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "specta",

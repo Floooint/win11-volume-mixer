@@ -1,4 +1,4 @@
-//! 从会话推断所属应用：AppId 与显示名称。规则见 docs/architecture.md“应用标识与聚合”。
+//! 从会话推断所属应用：AppId、显示名称与图标来源。规则见 docs/architecture.md“应用标识与聚合”。
 
 use std::ffi::c_void;
 use std::path::Path;
@@ -8,7 +8,7 @@ use windows::Win32::Media::Audio::IAudioSessionControl2;
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
-use windows::Win32::Storage::Packaging::Appx::GetPackageFamilyName;
+use windows::Win32::Storage::Packaging::Appx::{GetApplicationUserModelId, GetPackageFamilyName};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
@@ -20,6 +20,8 @@ use super::take_pwstr;
 pub struct AppInfo {
     pub app_id: String,
     pub name: String,
+    /// Shell 解析名（exe 路径或 `shell:AppsFolder\<AUMID>`），由 `icon` 模块提取图标。
+    pub icon: Option<String>,
 }
 
 pub fn resolve(control: &IAudioSessionControl2) -> AppInfo {
@@ -27,6 +29,7 @@ pub fn resolve(control: &IAudioSessionControl2) -> AppInfo {
         return AppInfo {
             app_id: "system".into(),
             name: "系统声音".into(),
+            icon: system_sounds_icon(),
         };
     }
 
@@ -46,6 +49,7 @@ fn from_process(pid: u32, display_name: Option<String>) -> AppInfo {
         name: display_name
             .clone()
             .unwrap_or_else(|| format!("未知应用（PID {pid}）")),
+        icon: None,
     };
 
     // 管理员权限进程等情况下会失败，按 PID 回退。
@@ -55,6 +59,7 @@ fn from_process(pid: u32, display_name: Option<String>) -> AppInfo {
     };
     let path = image_path(process);
     let family_name = package_family_name(process);
+    let aumid = app_user_model_id(process);
     let _ = unsafe { CloseHandle(process) };
 
     let Some(path) = path else {
@@ -64,8 +69,10 @@ fn from_process(pid: u32, display_name: Option<String>) -> AppInfo {
         .or_else(|| display_name.clone())
         .unwrap_or_else(|| file_stem(&path));
     let app_id = family_name.unwrap_or_else(|| path.to_lowercase());
+    // 打包应用的 exe 往往没有图标或只是通用图标，改用开始菜单中的应用磁贴图标。
+    let icon = Some(aumid.map_or(path, |id| format!(r"shell:AppsFolder\{id}")));
 
-    AppInfo { app_id, name }
+    AppInfo { app_id, name, icon }
 }
 
 fn image_path(process: HANDLE) -> Option<String> {
@@ -93,6 +100,24 @@ fn package_family_name(process: HANDLE) -> Option<String> {
     }
     // len 包含结尾的 0
     Some(String::from_utf16_lossy(&buf[..len as usize - 1]))
+}
+
+/// 打包应用的 AppUserModelID，例如 `Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic`。
+fn app_user_model_id(process: HANDLE) -> Option<String> {
+    let mut buf = [0u16; 512];
+    let mut len = buf.len() as u32;
+    let result =
+        unsafe { GetApplicationUserModelId(process, &mut len, Some(PWSTR(buf.as_mut_ptr()))) };
+    if result != ERROR_SUCCESS || len == 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&buf[..len as usize - 1]))
+}
+
+/// 系统声音没有进程路径，借用音量合成器（SndVol.exe）的扬声器图标。
+fn system_sounds_icon() -> Option<String> {
+    let root = std::env::var("SystemRoot").ok()?;
+    Some(format!(r"{root}\System32\SndVol.exe"))
 }
 
 /// 读取 exe 版本信息中的 FileDescription，例如“Google Chrome”。

@@ -37,7 +37,10 @@ export const events = {
 export type AppAudio = {
 	appId: string,
 	name: string,
-	/**  `data:` URL，暂未实现图标提取，恒为 `None`。 */
+	/**
+	 *  图标来源，前端通过 `appicon` 协议加载（`convertFileSrc(icon, "appicon")`）。
+	 *  无法确定来源时（如管理员权限进程）为 `None`，前端显示首字母占位。
+	 */
 	icon: string | null,
 	volume: VolumeState,
 	/**  是否有会话正在播放。 */

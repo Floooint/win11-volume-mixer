@@ -25,7 +25,8 @@ pub struct DeviceInfo {
 pub struct AppAudio {
     pub app_id: String,
     pub name: String,
-    /// `data:` URL，暂未实现图标提取，恒为 `None`。
+    /// 图标来源，前端通过 `appicon` 协议加载（`convertFileSrc(icon, "appicon")`）。
+    /// 无法确定来源时（如管理员权限进程）为 `None`，前端显示首字母占位。
     pub icon: Option<String>,
     pub volume: VolumeState,
     /// 是否有会话正在播放。

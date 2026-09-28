@@ -1,4 +1,5 @@
-import { type RefObject, useEffect, useRef } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { type AppAudio, commands } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Plus } from "@/components/animate-ui/icons/plus";
@@ -12,8 +13,34 @@ import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
 import { DEBUG_APP_PREFIX, useDebugStore } from "@/stores/debug";
 
-/** 应用首字母占位图标（图标提取尚未实现）。正在发声时换成强调色。 */
+/**
+ * 应用图标，由后端经 `appicon` 协议提供。加载期间留空，避免首字母一闪而过；
+ * 没有图标来源或加载失败时显示首字母占位，正在发声时换成强调色。
+ * 调用方以 `app.icon` 作为 key，来源变化时重置加载状态。
+ */
 function AppAvatar({ app }: { app: AppAudio }) {
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">(
+    app.icon ? "loading" : "error",
+  );
+
+  if (app.icon && status !== "error") {
+    return (
+      <div aria-hidden className="flex size-8 shrink-0 items-center justify-center">
+        <img
+          src={convertFileSrc(app.icon, "appicon")}
+          alt=""
+          draggable={false}
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+          className={cn(
+            "size-7 object-contain transition-opacity",
+            status === "loading" && "opacity-0",
+          )}
+        />
+      </div>
+    );
+  }
+
   const letter = app.appId === "system" ? "系" : (app.name.trim()[0] ?? "?").toUpperCase();
   return (
     <div
@@ -80,7 +107,7 @@ function AppItem({
         }
         volume={app.volume}
         active={app.active}
-        leading={<AppAvatar app={app} />}
+        leading={<AppAvatar key={app.icon ?? ""} app={app} />}
         scrollAreaRef={scrollAreaRef}
         trailing={
           isDebug && (

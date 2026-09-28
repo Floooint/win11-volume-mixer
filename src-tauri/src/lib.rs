@@ -5,6 +5,7 @@ mod config;
 mod error;
 mod events;
 mod feedback;
+mod icon;
 mod tray;
 mod window;
 
@@ -66,6 +67,12 @@ pub fn run() {
         }))
         .manage(window::WindowState::default())
         .manage(feedback::Feedback::default())
+        .manage(icon::IconService::start())
+        .register_asynchronous_uri_scheme_protocol(icon::SCHEME, |ctx, request, responder| {
+            ctx.app_handle()
+                .state::<icon::IconService>()
+                .respond(request.uri().path(), |response| responder.respond(response));
+        })
         .invoke_handler(builder.invoke_handler())
         .on_window_event(window::handle_event)
         .setup(move |app| {
