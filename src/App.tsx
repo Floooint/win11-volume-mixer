@@ -1,31 +1,29 @@
 import { useEffect, useState } from "react";
-import { type AudioSnapshot, commands, events } from "@/bindings";
+import { events } from "@/bindings";
+import { useAudioStore } from "@/stores/audio";
+
+const percent = (volume: number) => `${Math.round(volume * 100)}%`;
 
 // 阶段 2 调试视图：验证命令与事件已接通。正式的音量界面在阶段 3 实现。
 export default function App() {
-  const [snapshot, setSnapshot] = useState<AudioSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const snapshot = useAudioStore((s) => s.snapshot);
+  const error = useAudioStore((s) => s.error);
+  const connect = useAudioStore((s) => s.connect);
   const [log, setLog] = useState<string[]>([]);
 
+  useEffect(() => connect(), [connect]);
+
+  // 事件日志只用于调试，与状态更新无关。
   useEffect(() => {
     const push = (line: string) =>
       setLog((prev) => [`${new Date().toLocaleTimeString()} ${line}`, ...prev].slice(0, 30));
-
-    commands.getSnapshot().then((result) => {
-      if (result.status === "ok") setSnapshot(result.data);
-      else setError(result.error.message);
-    });
-
     const listeners = Promise.all([
-      events.audioSnapshot.listen((e) => {
-        setSnapshot(e.payload);
-        push(`snapshot：${e.payload.device?.name ?? "无设备"}`);
-      }),
-      events.audioMaster.listen((e) => push(`master：${Math.round(e.payload.volume * 100)}%`)),
+      events.audioSnapshot.listen((e) => push(`snapshot：${e.payload.device?.name ?? "无设备"}`)),
+      events.audioMaster.listen((e) => push(`系统音量：${percent(e.payload.volume)}`)),
       events.audioAppUpsert.listen((e) =>
-        push(`upsert：${e.payload.name} ${Math.round(e.payload.volume.volume * 100)}%`),
+        push(`应用音量：${e.payload.name} ${percent(e.payload.volume.volume)}`),
       ),
-      events.audioAppRemove.listen((e) => push(`remove：${e.payload.appId}`)),
+      events.audioAppRemove.listen((e) => push(`应用退出：${e.payload.appId}`)),
     ]);
     return () => {
       listeners.then((unlisten) => unlisten.forEach((fn) => fn()));
@@ -40,14 +38,15 @@ export default function App() {
         <section className="rounded-lg bg-card p-3">
           <p className="font-medium">
             {snapshot.device
-              ? `${snapshot.device.name} · ${Math.round(snapshot.device.master.volume * 100)}%`
+              ? `${snapshot.device.name} · 系统音量 ${percent(snapshot.device.master.volume)}${snapshot.device.master.muted ? "（静音）" : ""}`
               : "当前没有输出设备"}
           </p>
-          <ul className="mt-2 space-y-1 text-muted-foreground">
+          <p className="mt-2 text-xs text-muted-foreground">应用音量（相对于系统音量）：</p>
+          <ul className="mt-1 space-y-1 text-muted-foreground">
             {snapshot.apps.map((app) => (
               <li key={app.appId}>
                 {app.active ? "▶ " : "  "}
-                {app.name} · {Math.round(app.volume.volume * 100)}%
+                {app.name} · {percent(app.volume.volume)}
                 {app.volume.muted && "（静音）"}
               </li>
             ))}
@@ -55,7 +54,9 @@ export default function App() {
         </section>
       )}
       <section className="min-h-0 flex-1 overflow-auto rounded-lg bg-card p-3 font-mono text-xs text-muted-foreground">
-        {log.length === 0 ? "等待事件……在音量合成器中调节音量试试" : log.map((l, i) => <div key={i}>{l}</div>)}
+        {log.length === 0
+          ? "等待事件……在音量合成器中调节音量试试"
+          : log.map((line, i) => <div key={i}>{line}</div>)}
       </section>
     </main>
   );
