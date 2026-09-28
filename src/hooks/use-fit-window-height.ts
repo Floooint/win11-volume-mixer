@@ -25,8 +25,10 @@ export function useFitWindowHeight(
     const measure = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const fixed = root.clientHeight - scroll.clientHeight;
-        const height = Math.ceil(fixed + content.offsetHeight);
+        // 必须用带小数的尺寸：clientHeight 各自取整后相减，固定部分会随窗口高度差 1 px，
+        // 调整窗口后测得的高度又变回原值，窗口在两个高度之间来回跳动。
+        const fixed = root.getBoundingClientRect().height - scroll.getBoundingClientRect().height;
+        const height = Math.ceil(fixed + content.getBoundingClientRect().height);
         if (height !== lastSent) {
           lastSent = height;
           void commands.fitWindowHeight(height);

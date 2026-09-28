@@ -420,7 +420,8 @@ fn finish_hide<R: Runtime>(window: &tauri::Window<R>) -> bool {
 pub fn fitted_height(content: f64, scale: f64, screen_height: f64, work_area_height: f64) -> u32 {
     let max = (screen_height * MAX_SCREEN_RATIO).min(work_area_height - 2.0 * MARGIN * scale);
     let min = (MIN_HEIGHT * scale).min(max);
-    (content * scale).clamp(min, max).round() as u32
+    // 向上取整：窗口哪怕比内容矮不到 1 px，滚动区也会出现滚动条。
+    (content * scale).clamp(min, max).ceil() as u32
 }
 
 /// 前端报告内容高度（逻辑像素）后调整窗口高度，并保持贴近托盘。
