@@ -23,3 +23,6 @@ src-tauri/gen/schemas/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# 本地截图
+scripts/.screenshot*.png

@@ -22,6 +22,11 @@
         "maximizable": false,
         "minimizable": false,
         "decorations": false,
+        "transparent": true,
+        "shadow": true,
+        "windowEffects": {
+          "effects": ["mica"]
+        },
         "skipTaskbar": true,
         "alwaysOnTop": true,
         "visible": false

@@ -1,10 +1,11 @@
-import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   commands,
   type Settings_Serialize as Settings,
   type WindowPolicy_Serialize as WindowPolicy,
 } from "@/bindings";
+import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
+import { IconButton } from "@/components/IconButton";
 
 const MODES: { value: WindowPolicy; label: string; hint: string }[] = [
   { value: "smart", label: "智能", hint: "隐藏一段时间后释放界面，兼顾速度与内存" },
@@ -70,21 +71,15 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-1 pb-3">
-        <button
-          type="button"
-          onClick={onBack}
-          aria-label="返回"
-          title="返回"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" />
-        </button>
-        <h1 className="text-base font-semibold">设置</h1>
+      <header className="flex items-center gap-1 px-2 pt-3 pb-2">
+        <IconButton label="返回" onClick={onBack}>
+          <ArrowLeft size={16} />
+        </IconButton>
+        <h1 className="text-sm font-semibold">设置</h1>
       </header>
 
       {settings && (
-        <section className="rounded-lg bg-card p-3">
+        <section className="mx-3 rounded-xl border border-border bg-card p-3">
           <p className="font-medium">运行模式</p>
           <p className="mt-0.5 text-xs text-muted-foreground">窗口隐藏后如何处理界面</p>
           <div className="mt-3 flex flex-col gap-2" role="radiogroup" aria-label="运行模式">

@@ -87,7 +87,10 @@
 
   html,
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply text-foreground font-sans antialiased;
+    /* 窗口使用 Mica 背景（tauri.conf.json），页面只叠一层半透明底色保证文字可读；
+       Mica 不可用（如 Windows 10）时显示为这层底色。 */
+    background: color-mix(in oklch, var(--background) 72%, transparent);
     /* 桌面工具不需要文字选择和橡皮筋滚动 */
     user-select: none;
     overscroll-behavior: none;
