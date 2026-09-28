@@ -12,21 +12,50 @@ use crate::error::{AppError, AppResult, ErrorCode};
 
 const FILE_NAME: &str = "settings.json";
 
-/// 窗口隐藏时如何处理 WebView。实测数据见 docs/architecture.md“决策记录”。
+/// “智能”模式释放界面前等待的秒数范围。
+pub const SMART_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
+const DEFAULT_SMART_SECONDS: u32 = 300;
+
+/// 窗口隐藏后的运行模式。实测数据见 docs/architecture.md“决策记录”。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum WindowPolicy {
-    /// 只隐藏窗口：打开约 20 ms，常驻内存约 195 MB。
+    /// 常驻：只隐藏窗口。打开约 20 ms，常驻内存约 195 MB。
+    #[serde(alias = "keep")]
+    Resident,
+    /// 静默：隐藏即释放界面。打开约 0.55 秒，常驻内存约 3 MB。
+    #[serde(alias = "destroy")]
+    Silent,
+    /// 智能：隐藏后保留界面，连续 `smart_release_seconds` 秒未打开才释放。
     #[default]
-    Keep,
-    /// 销毁窗口与 WebView：打开约 0.55 秒，常驻内存约 18 MB。
-    Destroy,
+    Smart,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub window_policy: WindowPolicy,
+    /// 智能模式下，窗口隐藏多少秒后释放界面。
+    pub smart_release_seconds: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            window_policy: WindowPolicy::default(),
+            smart_release_seconds: DEFAULT_SMART_SECONDS,
+        }
+    }
+}
+
+impl Settings {
+    /// 把超出范围的值修正到合法范围，防止手动编辑设置文件写入异常值。
+    fn normalized(mut self) -> Self {
+        self.smart_release_seconds = self
+            .smart_release_seconds
+            .clamp(*SMART_SECONDS_RANGE.start(), *SMART_SECONDS_RANGE.end());
+        self
+    }
 }
 
 /// 设置的内存副本，Tauri 全局状态。
@@ -54,11 +83,13 @@ impl Config {
                 }
             })
             .unwrap_or_default();
+        settings = settings.normalized();
 
         // 仅用于对比测量，不写回文件。
         match std::env::var("VOLUME_MIXER_WINDOW").as_deref() {
-            Ok("keep") => settings.window_policy = WindowPolicy::Keep,
-            Ok("destroy") => settings.window_policy = WindowPolicy::Destroy,
+            Ok("resident" | "keep") => settings.window_policy = WindowPolicy::Resident,
+            Ok("silent" | "destroy") => settings.window_policy = WindowPolicy::Silent,
+            Ok("smart") => settings.window_policy = WindowPolicy::Smart,
             _ => {}
         }
 
@@ -74,6 +105,7 @@ impl Config {
 
     /// 保存设置，返回修改前的值。
     pub fn set(&self, settings: Settings) -> AppResult<Settings> {
+        let settings = settings.normalized();
         let path = self.path.as_ref().ok_or_else(save_failed)?;
         let text = serde_json::to_string_pretty(&settings).map_err(|_| save_failed())?;
         if let Some(dir) = path.parent() {
@@ -100,8 +132,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 默认保留webview() {
-        assert_eq!(Settings::default().window_policy, WindowPolicy::Keep);
+    fn 默认智能模式且等待300秒() {
+        let settings = Settings::default();
+        assert_eq!(settings.window_policy, WindowPolicy::Smart);
+        assert_eq!(settings.smart_release_seconds, 300);
     }
 
     #[test]
@@ -113,11 +147,34 @@ mod tests {
     #[test]
     fn 序列化为驼峰命名() {
         let settings = Settings {
-            window_policy: WindowPolicy::Destroy,
+            window_policy: WindowPolicy::Smart,
+            smart_release_seconds: 60,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r#"{"windowPolicy":"destroy"}"#
+            r#"{"windowPolicy":"smart","smartReleaseSeconds":60}"#
         );
+    }
+
+    #[test]
+    fn 兼容旧版设置值() {
+        let old: Settings = serde_json::from_str(r#"{"windowPolicy":"keep"}"#).unwrap();
+        assert_eq!(old.window_policy, WindowPolicy::Resident);
+        let old: Settings = serde_json::from_str(r#"{"windowPolicy":"destroy"}"#).unwrap();
+        assert_eq!(old.window_policy, WindowPolicy::Silent);
+    }
+
+    #[test]
+    fn 等待秒数被限制在10到600之间() {
+        let too_small = Settings {
+            smart_release_seconds: 0,
+            ..Settings::default()
+        };
+        assert_eq!(too_small.normalized().smart_release_seconds, 10);
+        let too_large = Settings {
+            smart_release_seconds: 9999,
+            ..Settings::default()
+        };
+        assert_eq!(too_large.normalized().smart_release_seconds, 600);
     }
 }

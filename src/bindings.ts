@@ -14,9 +14,9 @@ export const commands = {
 	setAppMute: (appId: string, muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_app_mute", { appId, muted })),
 	/**  前端首次渲染完成。新建的窗口在此之后才显示，避免出现空白窗口。 */
 	windowReady: () => __TAURI_INVOKE<void>("window_ready"),
-	getSettings: () => __TAURI_INVOKE<Settings>("get_settings"),
+	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings"),
 	/**  保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。 */
-	setSettings: (settings: Settings) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),
+	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),
 };
 
 /** Events */
@@ -84,8 +84,18 @@ export type ErrorCode =
 /**  系统总音量被外部修改。 */
 export type MasterChangedEvent = VolumeState;
 
-export type Settings = {
-	windowPolicy?: WindowPolicy,
+export type Settings = Settings_Serialize | Settings_Deserialize;
+
+export type Settings_Deserialize = {
+	windowPolicy?: WindowPolicy_Deserialize,
+	/**  智能模式下，窗口隐藏多少秒后释放界面。 */
+	smartReleaseSeconds?: number,
+};
+
+export type Settings_Serialize = {
+	windowPolicy: WindowPolicy_Serialize,
+	/**  智能模式下，窗口隐藏多少秒后释放界面。 */
+	smartReleaseSeconds: number,
 };
 
 export type VolumeState = {
@@ -93,12 +103,30 @@ export type VolumeState = {
 	muted: boolean,
 };
 
-/**  窗口隐藏时如何处理 WebView。实测数据见 docs/architecture.md“决策记录”。 */
-export type WindowPolicy = 
-/**  只隐藏窗口：打开约 20 ms，常驻内存约 195 MB。 */
+/**  窗口隐藏后的运行模式。实测数据见 docs/architecture.md“决策记录”。 */
+export type WindowPolicy = WindowPolicy_Serialize | WindowPolicy_Deserialize;
+
+/**  窗口隐藏后的运行模式。实测数据见 docs/architecture.md“决策记录”。 */
+export type WindowPolicy_Deserialize = 
+/**  常驻：只隐藏窗口。打开约 20 ms，常驻内存约 195 MB。 */
+"resident" | 
+/**  常驻：只隐藏窗口。打开约 20 ms，常驻内存约 195 MB。 */
 "keep" | 
-/**  销毁窗口与 WebView：打开约 0.55 秒，常驻内存约 18 MB。 */
-"destroy";
+/**  静默：隐藏即释放界面。打开约 0.55 秒，常驻内存约 3 MB。 */
+"silent" | 
+/**  静默：隐藏即释放界面。打开约 0.55 秒，常驻内存约 3 MB。 */
+"destroy" | 
+/**  智能：隐藏后保留界面，连续 `smart_release_seconds` 秒未打开才释放。 */
+"smart";
+
+/**  窗口隐藏后的运行模式。实测数据见 docs/architecture.md“决策记录”。 */
+export type WindowPolicy_Serialize = 
+/**  常驻：只隐藏窗口。打开约 20 ms，常驻内存约 195 MB。 */
+"resident" | 
+/**  静默：隐藏即释放界面。打开约 0.55 秒，常驻内存约 3 MB。 */
+"silent" | 
+/**  智能：隐藏后保留界面，连续 `smart_release_seconds` 秒未打开才释放。 */
+"smart";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

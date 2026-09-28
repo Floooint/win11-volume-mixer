@@ -1,10 +1,12 @@
 //! 主窗口：定位到托盘附近、显示 / 隐藏、失焦自动隐藏。
 //!
-//! 隐藏策略由设置项 [`WindowPolicy`] 决定：保留 WebView（打开快）或销毁 WebView（常驻内存低）。
+//! 隐藏后的行为由设置项 [`WindowPolicy`] 决定：常驻（保留界面）、静默（立即释放界面）、
+//! 智能（保留一段时间，超时未打开再释放）。
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use tauri::async_runtime::JoinHandle;
 use tauri::{
     AppHandle, Manager, PhysicalPosition, Runtime, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
@@ -27,6 +29,8 @@ pub struct WindowState {
     hidden_at: Mutex<Option<Instant>>,
     /// 正在创建的窗口：等前端首次渲染完成后再定位并显示，避免白屏闪烁。
     pending: Mutex<Option<Pending>>,
+    /// 智能模式下的释放计时器；再次打开窗口时取消。
+    release_timer: Mutex<Option<JoinHandle<()>>>,
 }
 
 struct Pending {
@@ -36,6 +40,41 @@ struct Pending {
 
 fn policy<R: Runtime, M: Manager<R>>(manager: &M) -> WindowPolicy {
     manager.state::<Config>().get().window_policy
+}
+
+fn cancel_release_timer<R: Runtime, M: Manager<R>>(manager: &M) {
+    let timer = manager
+        .state::<WindowState>()
+        .release_timer
+        .lock()
+        .ok()
+        .and_then(|mut t| t.take());
+    if let Some(timer) = timer {
+        timer.abort();
+    }
+}
+
+/// 智能模式：窗口隐藏后开始计时，到期仍未打开则释放界面。
+fn start_release_timer<R: Runtime>(window: &tauri::Window<R>) {
+    cancel_release_timer(window);
+    let seconds = window.state::<Config>().get().smart_release_seconds;
+    eprintln!("[window] 智能模式：开始计时 {seconds} 秒");
+    let app = window.app_handle().clone();
+    let timer = tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(u64::from(seconds))).await;
+        eprintln!("[window] 智能模式：计时到期");
+        // 计时期间用户可能改了模式，到期时再确认一次。
+        if policy(&app) == WindowPolicy::Smart
+            && let Some(window) = main_window(&app)
+            && !window.is_visible().unwrap_or(true)
+        {
+            eprintln!("[window] 智能模式：{seconds} 秒未打开，释放界面");
+            let _ = window.destroy();
+        }
+    });
+    if let Ok(mut t) = window.state::<WindowState>().release_timer.lock() {
+        *t = Some(timer);
+    }
 }
 
 /// 矩形（物理像素）。
@@ -127,11 +166,11 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
     WebviewWindowBuilder::from_config(app, config)?.build()
 }
 
-/// 启动时调用：保留策略下预先创建窗口，首次打开也能立即显示。
+/// 启动时调用：常驻和智能模式下预先创建窗口，首次打开也能立即显示。
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let policy = policy(app);
-    eprintln!("[window] 隐藏策略：{policy:?}");
-    if policy == WindowPolicy::Keep {
+    eprintln!("[window] 运行模式：{policy:?}");
+    if policy != WindowPolicy::Silent {
         create(app)?;
     }
     Ok(())
@@ -140,6 +179,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 /// 在托盘图标附近显示窗口；`tray` 为 `None` 时（如重复启动）保持原位置。
 pub fn show<R: Runtime>(app: &AppHandle<R>, tray: Option<Rect>) {
     let requested_at = Instant::now();
+    cancel_release_timer(app);
     match main_window(app) {
         Some(window) => {
             // 窗口正在创建、尚未渲染完成时，等 `ready` 统一显示。
@@ -197,11 +237,15 @@ fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
 
 fn hide<R: Runtime>(window: &tauri::Window<R>) {
     match policy(window) {
-        WindowPolicy::Keep => {
+        WindowPolicy::Resident => {
             let _ = window.hide();
         }
-        WindowPolicy::Destroy => {
+        WindowPolicy::Silent => {
             let _ = window.destroy();
+        }
+        WindowPolicy::Smart => {
+            let _ = window.hide();
+            start_release_timer(window);
         }
     }
 }

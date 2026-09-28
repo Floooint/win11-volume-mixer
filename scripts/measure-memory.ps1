@@ -1,4 +1,4 @@
-# 测量窗口隐藏策略：常驻内存（主进程 + WebView2 子进程）。
+﻿# 测量窗口隐藏策略：常驻内存（主进程 + WebView2 子进程）。
 # 用法：powershell -File measure-memory.ps1 -Policy keep|destroy
 param([string]$Policy = "keep", [int]$Seconds = 12)
 
