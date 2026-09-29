@@ -26,3 +26,8 @@ Desktop.ini
 
 # 本地截图
 scripts/.screenshot*.png
+
+# 本机设置（程序把设置存在 exe 所在目录；构建目录已忽略，这里防止放在项目根目录时误提交）
+/settings.json
+/settings.json.tmp
+/settings.json.bad

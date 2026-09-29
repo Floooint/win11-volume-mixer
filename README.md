@@ -2,6 +2,13 @@
 
 面向 Windows 11 的轻量级托盘音量控制工具。点击托盘图标，一眼看到所有正在使用声音的应用，逐个调节音量；外观贴近 Windows 11（Mica 背景、跟随系统深浅色与强调色）。
 
+<!-- 截图：把图片放到 docs/screenshots/ 下，文件名与下面一致即可显示。 -->
+<p align="center">
+  <img src="docs/screenshots/main.png" alt="主窗口" width="300">
+  <img src="docs/screenshots/details.png" alt="应用详情" width="300">
+  <img src="docs/screenshots/settings.png" alt="设置页" width="300">
+</p>
+
 ## 功能
 
 **音量控制**
@@ -93,6 +100,8 @@ Tauri 2、React 19、TypeScript、Tailwind CSS 4、Motion、Zustand；后端为 
 - [技术栈](docs/tech_stack.md)（含第三方许可证说明）
 - [开发环境与规范](agent.md)
 
-## 第三方许可
+## 许可证
 
-Animate UI 组件使用 MIT + Commons Clause 许可证，复制进项目的组件文件保留了原有的版权声明；shadcn/ui 与 Radix UI 为 MIT 许可证。详见 [技术栈](docs/tech_stack.md)。
+本项目代码以 [MIT 许可证](LICENSE) 发布。
+
+例外：`src/components/animate-ui/` 和 `src/hooks/use-is-in-view.tsx` 来自 [Animate UI](https://animate-ui.com)，适用其 MIT + Commons Clause 许可证（见 [src/components/animate-ui/LICENSE.md](src/components/animate-ui/LICENSE.md)）：可以作为本程序的一部分使用和分发，但不能单独出售或再分发这些组件本身。shadcn/ui 与 Radix UI 为 MIT 许可证。
