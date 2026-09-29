@@ -62,6 +62,8 @@ impl PinMode {
 pub struct WindowState {
     /// 最近一次因失焦而隐藏的时间。
     hidden_at: Mutex<Option<Instant>>,
+    /// 按下托盘图标时窗口是否打开着，松开时据此决定打开还是关闭。
+    open_at_press: Mutex<Option<bool>>,
     /// 正在创建的窗口：等前端首次渲染完成后再定位并显示，避免白屏闪烁。
     pending: Mutex<Option<Pending>>,
     /// 智能模式下的释放计时器；再次打开窗口时取消。
@@ -100,17 +102,17 @@ fn logical_width<R: Runtime, M: Manager<R>>(manager: &M) -> f64 {
         .lock()
         .ok()
         .and_then(|w| *w);
-    let width = preview.unwrap_or_else(|| manager.state::<Config>().get().window_width);
+    let width = preview.unwrap_or_else(|| manager.state::<Config>().read(|s| s.window_width));
     f64::from(width.clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end()))
 }
 
 fn policy<R: Runtime, M: Manager<R>>(manager: &M) -> WindowPolicy {
-    manager.state::<Config>().get().window_policy
+    manager.state::<Config>().read(|s| s.window_policy)
 }
 
 /// 动画帧率：用户设置优先，否则跟随窗口所在显示器的刷新率。
 fn fps<R: Runtime>(window: &tauri::Window<R>) -> u32 {
-    let configured = window.state::<Config>().get().animation_fps;
+    let configured = window.state::<Config>().read(|s| s.animation_fps);
     let refresh_rate = configured.is_none().then(|| {
         let monitor = window.current_monitor().ok().flatten();
         animation::display_refresh_rate(monitor.as_ref().and_then(|m| m.name()).map(String::as_str))
@@ -133,7 +135,7 @@ fn cancel_release_timer<R: Runtime, M: Manager<R>>(manager: &M) {
 /// 智能模式：窗口隐藏后开始计时，到期仍未打开则释放界面。
 fn start_release_timer<R: Runtime>(window: &tauri::Window<R>) {
     cancel_release_timer(window);
-    let seconds = window.state::<Config>().get().smart_release_seconds;
+    let seconds = window.state::<Config>().read(|s| s.smart_release_seconds);
     let app = window.app_handle().clone();
     let timer = tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(u64::from(seconds))).await;
@@ -240,7 +242,7 @@ fn window_theme(mode: ThemeMode) -> Option<tauri::Theme> {
 
 /// 设置变化后立即应用深浅色。
 pub fn apply_theme<R: Runtime>(window: &WebviewWindow<R>) {
-    let mode = window.state::<Config>().get().theme;
+    let mode = window.state::<Config>().read(|s| s.theme);
     if let Err(e) = window.set_theme(window_theme(mode)) {
         eprintln!("[window] 切换深浅色失败：{e}");
     }
@@ -263,13 +265,13 @@ pub(crate) fn browser_args_for<R: Runtime>(app: &AppHandle<R>) -> String {
     let hardware_acceleration = *app
         .state::<WindowState>()
         .hardware_acceleration
-        .get_or_init(|| app.state::<Config>().get().hardware_acceleration);
+        .get_or_init(|| app.state::<Config>().read(|s| s.hardware_acceleration));
     browser_args(hardware_acceleration)
 }
 
 /// 设置中的深浅色对应的窗口主题，新建窗口时使用。
 pub(crate) fn theme_for<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Theme> {
-    window_theme(app.state::<Config>().get().theme)
+    window_theme(app.state::<Config>().read(|s| s.theme))
 }
 
 /// 按 `tauri.conf.json` 中的配置创建主窗口（初始隐藏）。
@@ -436,9 +438,13 @@ fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
                 let _ = window.set_position(PhysicalPosition::new(target.x, y));
             },
         );
-        // 被新的动画取消时不修正位置，交给新动画处理。
+        // 被新的动画取消时不修正位置，交给新动画处理。滑入期间高度可能已变化（新建窗口时
+        // 列表稍后才加载），按当前尺寸重新贴近托盘，而不是用滑入前算出的位置。
         if completed {
-            let _ = window.set_position(target);
+            let placed = tray.is_some_and(|tray| move_near_tray(&window, tray).is_ok());
+            if !placed {
+                let _ = window.set_position(target);
+            }
         }
         if state.animation.is_current(generation) {
             state.entering.store(false, Ordering::SeqCst);
@@ -589,9 +595,12 @@ fn try_fit_height<R: Runtime>(
         return Ok(None);
     }
 
+    // 窗口高度变化时应用行会移动，详情浮窗与应用行对不齐，收起它。
+    crate::details::hide(window);
+
     let state = window.state::<WindowState>();
     let tray = state.last_tray.lock().ok().and_then(|t| *t);
-    // 滑入 / 滑出动画进行中不打断，隐藏时由下次显示负责定位。
+    // 滑入 / 滑出动画进行中不打断：只调整尺寸，滑入结束时按新尺寸定位；隐藏时由下次显示负责定位。
     let visible = window.is_visible()?
         && !state.hiding.load(Ordering::SeqCst)
         && !state.entering.load(Ordering::SeqCst);
@@ -601,9 +610,6 @@ fn try_fit_height<R: Runtime>(
 
     state.resize.next();
     window.set_size(PhysicalSize::new(width, height))?;
-    if visible && let Some(tray) = tray {
-        move_near_tray(window, tray)?;
-    }
     Ok(None)
 }
 
@@ -791,8 +797,47 @@ pub fn release_hold<R: Runtime, M: Manager<R>>(manager: &M) {
         .store(false, Ordering::SeqCst);
 }
 
-/// 托盘左键点击：窗口可见则隐藏，否则在托盘附近显示。
+/// 托盘左键按下：记下窗口此时是否打开着。按下时任务栏获得焦点，窗口随即失焦隐藏，
+/// 松开时再看窗口状态就分不清这次点击是要关闭还是打开。
+pub fn tray_pressed<R: Runtime>(app: &AppHandle<R>) {
+    let state = app.state::<WindowState>();
+    let visible = main_window(app).is_some_and(|w| w.is_visible().unwrap_or(false))
+        && !state.hiding.load(Ordering::SeqCst);
+    // 失焦事件可能先于按下事件到达：刚因失焦开始隐藏的，也算按下时打开着。
+    let just_blurred = state
+        .hidden_at
+        .lock()
+        .ok()
+        .and_then(|t| *t)
+        .is_some_and(|t| t.elapsed() < REOPEN_GUARD);
+    if let Ok(mut open) = state.open_at_press.lock() {
+        *open = Some(visible || just_blurred);
+    }
+}
+
+/// 托盘左键点击（松开）：按下时窗口打开着则关闭，否则在托盘附近显示。
 pub fn toggle<R: Runtime>(app: &AppHandle<R>, tray: Rect) {
+    let open_at_press = app
+        .state::<WindowState>()
+        .open_at_press
+        .lock()
+        .ok()
+        .and_then(|mut t| t.take());
+    if let Some(open) = open_at_press {
+        let hiding = app.state::<WindowState>().hiding.load(Ordering::SeqCst);
+        match main_window(app) {
+            // 按下时已因失焦开始隐藏的，不需要再处理。
+            Some(window) if open => {
+                if window.is_visible().unwrap_or(false) && !hiding {
+                    hide(&window.as_ref().window());
+                }
+            }
+            _ if !open => show(app, Some(tray)),
+            _ => {}
+        }
+        return;
+    }
+    // 没有收到按下事件时，按失焦隐藏的时间判断。
     let just_hidden = app
         .state::<WindowState>()
         .hidden_at
@@ -825,9 +870,14 @@ pub fn handle_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) 
             crate::details::hide(window);
             hide_on_blur(window.app_handle());
         }
-        WindowEvent::CloseRequested { api, .. } if label == MAIN => {
+        WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            hide(window);
+            if label == MAIN {
+                hide(window);
+            } else {
+                // 浮窗有焦点时按 Alt+F4：只隐藏，保留窗口并清除显示状态。
+                crate::details::hide(window);
+            }
         }
         _ => {}
     }

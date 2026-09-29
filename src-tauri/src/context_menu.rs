@@ -67,7 +67,7 @@ fn try_install<R: Runtime>(
             return Ok(());
         };
         let items = unsafe { args.MenuItems()? };
-        let debug = app.state::<Config>().get().debug_tools;
+        let debug = app.state::<Config>().read(|s| s.debug_tools);
         remove_items(&items, debug)?;
         if let (Some(sender), Some(environment)) = (sender, &environment) {
             add_frontend_items(sender, args, items, environment.clone())?;

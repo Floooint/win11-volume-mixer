@@ -48,7 +48,6 @@ pub fn create(app: &App) -> tauri::Result<()> {
         ],
     )?;
 
-    app.manage(TrayState::default());
     let handle = app.handle().clone();
     theme::watch(move || schedule_refresh(&handle));
 
@@ -64,6 +63,11 @@ pub fn create(app: &App) -> tauri::Result<()> {
         .on_tray_icon_event(|tray, event| {
             let app = tray.app_handle();
             match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Down,
+                    ..
+                } => window::tray_pressed(app),
                 TrayIconEvent::Click {
                     button: MouseButton::Left,
                     button_state: MouseButtonState::Up,
@@ -86,6 +90,8 @@ pub fn create(app: &App) -> tauri::Result<()> {
         builder = builder.icon(icon.clone());
     }
     builder.build(app)?;
+    // 托盘创建前音频线程可能已报告过音量状态（已记在 `TrayState` 中），创建后按它刷新一次图标。
+    schedule_refresh(app.handle());
     wheel::set_taskbar(
         app.handle(),
         app.state::<Config>().read(|s| s.taskbar_wheel),

@@ -117,21 +117,32 @@ pub fn ready<R: Runtime>(window: &WebviewWindow<R>, content_height: f64) {
     }
 }
 
-/// 隐藏浮窗（再次点击同一应用、点击其他位置、列表滚动或主窗口失焦）。
+/// 隐藏浮窗（再次点击同一应用、点击其他位置、列表滚动、主窗口高度变化或失焦）。
+/// 可在任意线程调用：窗口操作转到主线程执行，保证先交还焦点再隐藏。
 pub fn hide<R: Runtime, M: Manager<R>>(manager: &M) {
     let state = manager.state::<DetailsState>();
     if let Ok(mut request) = state.request.lock() {
         *request = None;
     }
-    if let Some(window) = manager.get_webview_window(LABEL) {
+    let app = manager.app_handle().clone();
+    let _ = manager.app_handle().run_on_main_thread(move || {
+        // 渲染期间已重新请求显示（如立即点击了另一个应用），不隐藏。
+        let requested = app
+            .state::<DetailsState>()
+            .request
+            .lock()
+            .is_ok_and(|r| r.is_some());
+        let Some(window) = app.get_webview_window(LABEL).filter(|_| !requested) else {
+            return;
+        };
         // 浮窗有焦点时（点击过浮窗）先把焦点交回主窗口，否则隐藏后系统会激活别的程序，主窗口随之失焦隐藏。
         if window.is_focused().unwrap_or(false)
-            && let Some(main) = manager.get_webview_window(MAIN)
+            && let Some(main) = app.get_webview_window(MAIN)
         {
             let _ = main.set_focus();
         }
         hide_window(&window);
-    }
+    });
 }
 
 /// 隐藏浮窗。浮窗由 `SetWindowPos` 直接显示（见 [`place`]），Tauri 记录的可见状态一直是隐藏，

@@ -107,6 +107,8 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .manage(window::WindowState::default())
         .manage(details::DetailsState::default())
+        // 必须在音频服务启动前注册：音频线程初始化后立即报告音量状态，托盘此时可能还没创建。
+        .manage(tray::TrayState::default())
         .manage(accent::AccentWatcher::default())
         .manage(feedback::Feedback::default())
         .manage(icon::IconService::start())

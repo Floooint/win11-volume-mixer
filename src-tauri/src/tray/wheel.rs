@@ -15,7 +15,6 @@
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
@@ -291,14 +290,13 @@ fn read_mouse(handle: HRAWINPUT) -> Option<Option<i32>> {
 /// 滚轮停止后播放一次提示音，与窗口内滚轮调节的反馈一致。
 fn schedule_feedback(app: AppHandle) {
     let seq = WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
-    let _ = thread::Builder::new()
-        .name("tray-feedback".into())
-        .spawn(move || {
-            thread::sleep(FEEDBACK_DELAY);
-            if WHEEL_SEQ.load(Ordering::SeqCst) == seq {
-                app.state::<Feedback>().play();
-            }
-        });
+    // 用异步任务等待，快速滚动时不会每格都新建一个系统线程。
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(FEEDBACK_DELAY).await;
+        if WHEEL_SEQ.load(Ordering::SeqCst) == seq {
+            app.state::<Feedback>().play();
+        }
+    });
 }
 
 fn contains(rect: &Rect, pt: POINT) -> bool {
