@@ -1,4 +1,4 @@
-//! 系统托盘：左键显示 / 隐藏窗口，右键菜单打开或退出，中键切换静音，滚轮调节系统音量
+//! 系统托盘：左键显示 / 隐藏窗口，右键菜单打开、静音或退出，中键切换静音，滚轮调节系统音量
 //! （可设置为在整个任务栏上响应滚轮）。
 //! 图标随系统音量和静音状态变化；样式和颜色可在设置中选择，颜色默认跟随任务栏深浅色。
 
@@ -10,7 +10,7 @@ mod wheel;
 use std::sync::Mutex;
 
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager, Position, Size};
 
@@ -21,6 +21,7 @@ use glyph::Icon;
 
 const TRAY_ID: &str = "main";
 const MENU_OPEN: &str = "open";
+const MENU_MUTE: &str = "mute";
 const MENU_QUIT: &str = "quit";
 /// 设备名很长时截断，Windows 托盘提示最多显示 127 个字符。
 const MAX_DEVICE_NAME: usize = 60;
@@ -36,17 +37,27 @@ struct Inner {
     /// 当前图标对应的（图标内容、颜色、尺寸），相同时不重绘。
     icon: Option<(Icon, [u8; 3], u32)>,
     tooltip: String,
+    /// 右键菜单中的“静音”，勾选状态随系统静音同步。
+    mute_item: Option<CheckMenuItem<tauri::Wry>>,
+    /// “静音”当前的（可用、勾选）状态，相同时不更新。
+    mute_state: Option<(bool, bool)>,
 }
 
 pub fn create(app: &App) -> tauri::Result<()> {
+    // 勾选状态在 `refresh` 中按系统静音同步；没有输出设备时不可用。
+    let mute = CheckMenuItem::with_id(app, MENU_MUTE, "静音", false, false, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, MENU_OPEN, "打开", true, None::<&str>)?,
+            &mute,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?,
         ],
     )?;
+    if let Ok(mut inner) = app.state::<TrayState>().0.lock() {
+        inner.mute_item = Some(mute);
+    }
 
     let handle = app.handle().clone();
     theme::watch(move || schedule_refresh(&handle));
@@ -57,6 +68,14 @@ pub fn create(app: &App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_OPEN => window::show(app, rect(app)),
+            MENU_MUTE => {
+                app.state::<AudioService>().post(Command::ToggleMasterMute);
+                // 点击时菜单项会自己切换勾选；清掉记录并刷新，按实际静音状态重新同步（切换失败时也不会错）。
+                if let Ok(mut inner) = app.state::<TrayState>().0.lock() {
+                    inner.mute_state = None;
+                }
+                schedule_refresh(app);
+            }
             MENU_QUIT => app.exit(0),
             _ => {}
         })
@@ -171,6 +190,18 @@ fn refresh(app: &AppHandle) {
     if inner.tooltip != tooltip {
         let _ = tray.set_tooltip(Some(&tooltip));
         inner.tooltip = tooltip;
+    }
+
+    let mute_state = (
+        status.is_some(),
+        status.as_ref().is_some_and(|s| s.volume.muted),
+    );
+    if inner.mute_state != Some(mute_state)
+        && let Some(item) = &inner.mute_item
+    {
+        let _ = item.set_enabled(mute_state.0);
+        let _ = item.set_checked(mute_state.1);
+        inner.mute_state = Some(mute_state);
     }
 }
 
