@@ -736,7 +736,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
       className="mx-3 rounded-xl border border-border bg-card px-3 py-3"
     >
       <VolumeRow
-        name="系统音量"
+        name="总音量"
         detail={device.name}
         volume={device.master}
         onVolumeChange={setMasterVolume}
