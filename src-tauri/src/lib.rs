@@ -40,6 +40,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_settings,
             commands::preview_window_width,
             commands::get_autostart,
+            commands::get_pin_mode,
+            commands::set_pin_mode,
             commands::get_accent_colors,
             commands::set_autostart,
         ])

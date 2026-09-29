@@ -96,6 +96,19 @@ pub fn get_settings(config: State<'_, Config>) -> Settings {
     config.get()
 }
 
+#[tauri::command]
+#[specta::specta]
+pub fn get_pin_mode(app: tauri::AppHandle) -> crate::window::PinMode {
+    crate::window::pin_mode(&app)
+}
+
+/// 切换窗口固定方式（标题栏图钉按钮）。
+#[tauri::command]
+#[specta::specta]
+pub fn set_pin_mode(window: tauri::WebviewWindow, mode: crate::window::PinMode) {
+    crate::window::set_pin_mode(&window, mode);
+}
+
 /// 当前 Windows 强调色，之后的变化通过 `theme://accent` 事件推送。读取失败时为 `None`。
 #[tauri::command]
 #[specta::specta]

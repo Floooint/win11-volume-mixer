@@ -1,4 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Pin, Plus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   type ReactNode,
@@ -9,9 +10,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { type AppAudio, commands } from "@/bindings";
+import { type AppAudio, commands, type PinMode } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
-import { Plus } from "@/components/animate-ui/icons/plus";
 import { Settings as SettingsIcon } from "@/components/animate-ui/icons/settings";
 import { Trash2 } from "@/components/animate-ui/icons/trash-2";
 import { VolumeOff } from "@/components/animate-ui/icons/volume-off";
@@ -67,6 +67,45 @@ function AppAvatar({ app }: { app: AppAudio }) {
     >
       {letter}
     </div>
+  );
+}
+
+const PIN_MODES: Record<PinMode, { next: PinMode; label: string }> = {
+  normal: { next: "pinned", label: "固定窗口：当前失焦自动隐藏，点击改为定住" },
+  pinned: { next: "pinnedOnTop", label: "固定窗口：当前已定住，点击改为定住并置顶" },
+  pinnedOnTop: { next: "normal", label: "固定窗口：当前已定住并置顶，点击恢复失焦隐藏" },
+};
+
+/**
+ * 图钉：在“正常（失焦隐藏）”“定住”“定住并置顶”之间循环切换。
+ * 状态保存在后端（只在本次运行中有效），窗口重建后重新读取。
+ */
+function PinButton() {
+  const [mode, setMode] = useState<PinMode>("normal");
+  useEffect(() => {
+    commands.getPinMode().then(setMode);
+  }, []);
+
+  const { next, label } = PIN_MODES[mode];
+  return (
+    <IconButton
+      label={label}
+      aria-pressed={mode !== "normal"}
+      onClick={() => {
+        setMode(next);
+        void commands.setPinMode(next);
+      }}
+      className={cn(
+        mode !== "normal" && "text-primary hover:text-primary",
+        mode === "pinnedOnTop" && "bg-primary/15 hover:bg-primary/20",
+      )}
+    >
+      <Pin
+        size={16}
+        fill={mode === "pinnedOnTop" ? "currentColor" : "none"}
+        className={cn("transition-transform duration-150", mode === "normal" && "rotate-45")}
+      />
+    </IconButton>
   );
 }
 
@@ -248,6 +287,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
               </IconButton>
             </>
           )}
+          <PinButton />
           <IconButton label="设置" onClick={onOpenSettings}>
             <SettingsIcon size={16} />
           </IconButton>

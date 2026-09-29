@@ -32,6 +32,9 @@ export const commands = {
 	previewWindowWidth: (width: number) => __TAURI_INVOKE<void>("preview_window_width", { width }),
 	/**  是否开机自启（读取系统中的实际注册状态）。 */
 	getAutostart: () => __TAURI_INVOKE<boolean>("get_autostart"),
+	getPinMode: () => __TAURI_INVOKE<PinMode>("get_pin_mode"),
+	/**  切换窗口固定方式（标题栏图钉按钮）。 */
+	setPinMode: (mode: PinMode) => __TAURI_INVOKE<void>("set_pin_mode", { mode }),
 	/**  当前 Windows 强调色，之后的变化通过 `theme://accent` 事件推送。读取失败时为 `None`。 */
 	getAccentColors: () => __TAURI_INVOKE<{
 	light: string,
@@ -118,6 +121,15 @@ export type ErrorCode =
 
 /**  系统总音量被外部修改。 */
 export type MasterChangedEvent = VolumeState;
+
+/**  窗口固定方式，由标题栏的图钉按钮切换，只在本次运行中保持。 */
+export type PinMode = 
+/**  弹出面板：失焦自动隐藏，保持在最前。 */
+"normal" | 
+/**  定住：失焦不隐藏，可被其他窗口遮挡。 */
+"pinned" | 
+/**  定住并置顶：失焦不隐藏，始终在最前。 */
+"pinnedOnTop";
 
 export type Settings = Settings_Serialize | Settings_Deserialize;
 

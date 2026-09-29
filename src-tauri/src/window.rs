@@ -13,6 +13,9 @@ use tauri::{
     WebviewWindowBuilder, WindowEvent,
 };
 
+use serde::{Deserialize, Serialize};
+use specta::Type;
+
 use crate::animation::{self, Generation};
 use crate::config::{Config, ThemeMode, WIDTH_RANGE, WindowPolicy};
 
@@ -30,6 +33,29 @@ const MAX_SCREEN_RATIO: f64 = 0.8;
 /// 点击托盘图标时，窗口会先因失焦而隐藏，紧接着收到点击事件。
 /// 在这个时间窗口内的点击视为“关闭”，不再重新打开。
 const REOPEN_GUARD: Duration = Duration::from_millis(250);
+
+/// 窗口固定方式，由标题栏的图钉按钮切换，只在本次运行中保持。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PinMode {
+    /// 弹出面板：失焦自动隐藏，保持在最前。
+    #[default]
+    Normal,
+    /// 定住：失焦不隐藏，可被其他窗口遮挡。
+    Pinned,
+    /// 定住并置顶：失焦不隐藏，始终在最前。
+    PinnedOnTop,
+}
+
+impl PinMode {
+    fn always_on_top(self) -> bool {
+        self != Self::Pinned
+    }
+
+    fn hides_on_blur(self) -> bool {
+        self == Self::Normal
+    }
+}
 
 /// 窗口相关的全局状态。
 #[derive(Default)]
@@ -55,6 +81,7 @@ pub struct WindowState {
     /// 首次创建窗口时的“硬件加速”设置。WebView2 的启动参数只在浏览器进程创建时生效，
     /// 且同一数据目录下参数必须一致，因此整个程序运行期间固定使用这个值，改设置后重启生效。
     hardware_acceleration: OnceLock<bool>,
+    pin: Mutex<PinMode>,
 }
 
 struct Pending {
@@ -246,6 +273,8 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .theme(theme)
         .build()?;
     disable_system_transitions(&window);
+    // 窗口被释放后重建时，恢复当前的固定方式（配置中默认置顶）。
+    let _ = window.set_always_on_top(pin_mode(app).always_on_top());
     let handle = app.clone();
     let _ = window.with_webview(move |webview| {
         crate::context_menu::install(&handle, &webview.controller(), &webview.environment())
@@ -708,6 +737,24 @@ fn target_near_tray<R: Runtime>(
     )))
 }
 
+pub fn pin_mode<R: Runtime, M: Manager<R>>(manager: &M) -> PinMode {
+    manager
+        .state::<WindowState>()
+        .pin
+        .lock()
+        .map(|p| *p)
+        .unwrap_or_default()
+}
+
+pub fn set_pin_mode<R: Runtime>(window: &WebviewWindow<R>, mode: PinMode) {
+    if let Ok(mut pin) = window.state::<WindowState>().pin.lock() {
+        *pin = mode;
+    }
+    if let Err(e) = window.set_always_on_top(mode.always_on_top()) {
+        eprintln!("[window] 设置置顶失败：{e}");
+    }
+}
+
 /// 托盘左键点击：窗口可见则隐藏，否则在托盘附近显示。
 pub fn toggle<R: Runtime>(app: &AppHandle<R>, tray: Rect) {
     let just_hidden = app
@@ -735,7 +782,9 @@ pub fn handle_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) 
     }
     match event {
         // 新建窗口在渲染完成前不可见，此时的失焦事件忽略。
-        WindowEvent::Focused(false) if window.is_visible().unwrap_or(false) => {
+        WindowEvent::Focused(false)
+            if window.is_visible().unwrap_or(false) && pin_mode(window).hides_on_blur() =>
+        {
             if let Ok(mut t) = window.state::<WindowState>().hidden_at.lock() {
                 *t = Some(Instant::now());
             }
@@ -772,6 +821,13 @@ mod tests {
         width: 1920.0,
         height: 1080.0,
     };
+
+    #[test]
+    fn 固定方式决定失焦隐藏和置顶() {
+        assert!(PinMode::Normal.hides_on_blur() && PinMode::Normal.always_on_top());
+        assert!(!PinMode::Pinned.hides_on_blur() && !PinMode::Pinned.always_on_top());
+        assert!(!PinMode::PinnedOnTop.hides_on_blur() && PinMode::PinnedOnTop.always_on_top());
+    }
 
     #[test]
     fn 关闭硬件加速时追加禁用_gpu_参数且保留默认参数() {
