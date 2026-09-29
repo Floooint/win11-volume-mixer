@@ -153,9 +153,9 @@ pub struct Settings {
     pub animation_fps: Option<u32>,
     /// 窗口宽度（逻辑像素）。
     pub window_width: u32,
-    /// 系统音量放在应用列表下方（靠近任务栏），默认在上方。
+    /// 系统音量放在应用列表下方（靠近任务栏），默认开启。
     pub master_at_bottom: bool,
-    /// 应用列表倒序：活跃应用排在底部，更靠近任务栏。
+    /// 应用列表倒序：活跃应用排在底部，更靠近任务栏。默认开启。
     pub apps_reversed: bool,
     /// 界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
     /// docs/architecture.md），界面简单，软件渲染也足够流畅。重启程序后生效。
@@ -197,8 +197,8 @@ impl Default for Settings {
             debug_tools: false,
             animation_fps: None,
             window_width: DEFAULT_WIDTH,
-            master_at_bottom: false,
-            apps_reversed: false,
+            master_at_bottom: true,
+            apps_reversed: true,
             hardware_acceleration: true,
             theme: ThemeMode::System,
             accent: None,
@@ -551,8 +551,8 @@ mod tests {
         assert!(!settings.debug_tools, "默认关闭调试工具");
         assert_eq!(settings.animation_fps, None, "默认跟随显示器刷新率");
         assert_eq!(settings.window_width, 340);
-        assert!(!settings.master_at_bottom, "默认系统音量在上方");
-        assert!(!settings.apps_reversed, "默认活跃应用在上方");
+        assert!(settings.master_at_bottom, "默认系统音量置底，靠近任务栏");
+        assert!(settings.apps_reversed, "默认倒序，活跃应用在底部");
         assert!(settings.hardware_acceleration, "默认开启硬件加速");
         assert!(settings.taskbar_wheel, "默认在整个任务栏上响应滚轮");
         assert_eq!(settings.wheel_step, 2);

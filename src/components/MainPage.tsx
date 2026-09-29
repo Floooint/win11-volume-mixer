@@ -701,8 +701,8 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const clearDebugApps = useDebugStore((s) => s.clear);
   const debugTools = useSettingsStore((s) => s.settings?.debugTools ?? false);
 
-  const masterAtBottom = useSettingsStore((s) => s.settings?.masterAtBottom ?? false);
-  const appsReversed = useSettingsStore((s) => s.settings?.appsReversed ?? false);
+  const masterAtBottom = useSettingsStore((s) => s.settings?.masterAtBottom ?? true);
+  const appsReversed = useSettingsStore((s) => s.settings?.appsReversed ?? true);
   const autostartPrompt = useSettingsStore((s) => s.settings?.autostartPrompt ?? false);
 
   const device = snapshot?.device;

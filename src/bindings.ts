@@ -230,9 +230,9 @@ export type Settings_Deserialize = {
 	animationFps?: number | null,
 	/**  窗口宽度（逻辑像素）。 */
 	windowWidth?: number,
-	/**  系统音量放在应用列表下方（靠近任务栏），默认在上方。 */
+	/**  系统音量放在应用列表下方（靠近任务栏），默认开启。 */
 	masterAtBottom?: boolean,
-	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。 */
+	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。默认开启。 */
 	appsReversed?: boolean,
 	/**
 	 *  界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
@@ -279,9 +279,9 @@ export type Settings_Serialize = {
 	animationFps: number | null,
 	/**  窗口宽度（逻辑像素）。 */
 	windowWidth: number,
-	/**  系统音量放在应用列表下方（靠近任务栏），默认在上方。 */
+	/**  系统音量放在应用列表下方（靠近任务栏），默认开启。 */
 	masterAtBottom: boolean,
-	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。 */
+	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。默认开启。 */
 	appsReversed: boolean,
 	/**
 	 *  界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
