@@ -1,6 +1,9 @@
 //! 用户设置：保存在程序所在目录的 `settings.json`，便于备份和随程序一起移动。
 //! 程序目录不可写（如安装到 Program Files）时，改存到应用配置目录（`%APPDATA%\<identifier>`）。
 //! 旧版本的设置保存在应用配置目录，首次使用新位置时复制过来（不删除旧文件）。
+//!
+//! 写入时先写临时文件再替换，中途崩溃不会留下半截文件。读取时某一项无法解析（如降级后
+//! 遇到新版本的取值）只让该项使用默认值；整个文件都无法解析时先备份为 `settings.json.bad`。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -355,13 +358,19 @@ impl Config {
         eprintln!("[config] 设置文件：{:?}", path);
         let mut settings: Settings = source
             .as_ref()
-            .and_then(|p| fs::read_to_string(p).ok())
-            .and_then(|text| match serde_json::from_str(&text) {
-                Ok(settings) => Some(settings),
-                Err(e) => {
-                    eprintln!("[config] 设置文件无法解析，使用默认值：{e}");
-                    None
+            .and_then(|p| fs::read_to_string(p).ok().map(|text| (p, text)))
+            .and_then(|(p, text)| {
+                let parsed = parse_lenient(&text);
+                if parsed.is_none() {
+                    // 保留原文件，之后保存设置时不会把用户的数据悄悄覆盖掉。
+                    let backup = p.with_extension("json.bad");
+                    eprintln!(
+                        "[config] 设置文件无法解析，使用默认值，原文件备份为 {}",
+                        backup.display()
+                    );
+                    let _ = fs::copy(p, backup);
                 }
+                parsed
             })
             .unwrap_or_default();
         settings = settings.normalized();
@@ -409,7 +418,7 @@ impl Config {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).map_err(|e| log_io(&e))?;
         }
-        fs::write(path, text).map_err(|e| log_io(&e))?;
+        write_atomic(path, text.as_bytes()).map_err(|e| log_io(&e))?;
 
         let mut current = self.settings.lock().map_err(|_| save_failed())?;
         Ok(std::mem::replace(&mut *current, settings))
@@ -417,14 +426,30 @@ impl Config {
 }
 
 /// 设置文件的位置：程序所在目录（可写时），否则为旧位置（应用配置目录）。
+/// 保存时要在同一目录创建临时文件，所以即使程序目录中已有设置文件，目录不可写时也改用旧位置，
+/// 并把程序目录中的设置复制过去（旧位置还没有设置时）。
 fn settings_path(legacy: Option<&Path>) -> Option<PathBuf> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf));
-    match exe_dir {
-        Some(dir) if dir.join(FILE_NAME).exists() || is_writable(&dir) => Some(dir.join(FILE_NAME)),
-        _ => legacy.map(Path::to_path_buf),
+    let Some(dir) = exe_dir else {
+        return legacy.map(Path::to_path_buf);
+    };
+    let local = dir.join(FILE_NAME);
+    if is_writable(&dir) {
+        return Some(local);
     }
+    let legacy = legacy?;
+    if local.exists() && !legacy.exists() {
+        let copied = legacy
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| fs::copy(&local, legacy));
+        if let Err(e) = copied {
+            eprintln!("[config] 无法把设置复制到 {}：{e}", legacy.display());
+        }
+    }
+    Some(legacy.to_path_buf())
 }
 
 /// 能否在目录中创建文件：试着创建一个临时文件再删除。
@@ -441,6 +466,43 @@ fn is_writable(dir: &Path) -> bool {
     created
 }
 
+/// 先写入同目录的临时文件并刷到磁盘，再替换原文件：中途崩溃或断电时原文件保持完整。
+fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = path.with_extension("json.tmp");
+    let mut file = fs::File::create(&tmp)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    drop(file);
+    // Windows 上 `rename` 会覆盖已存在的目标文件。
+    fs::rename(&tmp, path)
+}
+
+/// 解析设置文件。整体解析失败时逐项尝试：无法解析的项使用默认值，其余项保留。
+/// 整个文件都不是 JSON 对象时返回 `None`。
+fn parse_lenient(text: &str) -> Option<Settings> {
+    if let Ok(settings) = serde_json::from_str(text) {
+        return Some(settings);
+    }
+    let serde_json::Value::Object(fields) = serde_json::from_str(text).ok()? else {
+        return None;
+    };
+    let serde_json::Value::Object(mut merged) = serde_json::to_value(Settings::default()).ok()?
+    else {
+        return None;
+    };
+    for (key, value) in fields {
+        let mut trial = merged.clone();
+        trial.insert(key.clone(), value);
+        if serde_json::from_value::<Settings>(serde_json::Value::Object(trial.clone())).is_ok() {
+            merged = trial;
+        } else {
+            eprintln!("[config] 设置项 {key} 无法解析，使用默认值");
+        }
+    }
+    serde_json::from_value(serde_json::Value::Object(merged)).ok()
+}
+
 fn save_failed() -> AppError {
     AppError::new(ErrorCode::ConfigFailure, "设置保存失败")
 }
@@ -453,6 +515,32 @@ fn log_io(e: &std::io::Error) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 某一项无法解析时只让该项使用默认值() {
+        let text = r#"{"windowWidth": 400, "theme": "未来的主题", "debugTools": true}"#;
+        let settings = parse_lenient(text).expect("其余项应能读取");
+        assert_eq!(settings.window_width, 400);
+        assert!(settings.debug_tools);
+        assert_eq!(settings.theme, Settings::default().theme);
+    }
+
+    #[test]
+    fn 半截文件无法解析() {
+        assert!(parse_lenient(r#"{"windowWidth": 4"#).is_none());
+    }
+
+    #[test]
+    fn 原子写入会覆盖已有文件且不留临时文件() {
+        let dir = std::env::temp_dir().join(format!("volume-mixer-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        write_atomic(&path, b"old").unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+        assert!(!path.with_extension("json.tmp").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn 默认智能模式且等待300秒() {
