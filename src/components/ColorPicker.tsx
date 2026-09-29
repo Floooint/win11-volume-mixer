@@ -63,10 +63,12 @@ function useDrag(onMove: (x: number, y: number) => void, onEnd: () => void) {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) update(e);
     },
     onPointerUp: (e: React.PointerEvent) => {
-      if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-      e.currentTarget.releasePointerCapture(e.pointerId);
-      handlers.current.onEnd();
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
     },
+    // 松手释放捕获和意外丢失捕获（如拖动中窗口失焦）都在这里结束，保证预览的颜色会被保存。
+    onLostPointerCapture: () => handlers.current.onEnd(),
   };
 }
 

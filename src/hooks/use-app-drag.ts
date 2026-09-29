@@ -32,12 +32,26 @@ function dropTargetAt(x: number, y: number): DropTarget | null {
   return null;
 }
 
+/** 拖动结束后吞掉紧接着的一次点击：松手处的点击不应触发应用行的点击操作（如显示详情）。 */
+function swallowNextClick() {
+  const stop = (e: MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  window.addEventListener("click", stop, { capture: true, once: true });
+  // 点击事件在 pointerup 之后同步派发；没有点击（如松手位置不同）时下一轮移除监听。
+  setTimeout(() => window.removeEventListener("click", stop, { capture: true }));
+}
+
 /**
  * 应用拖放：从拖动手柄上按下并移动后开始拖动，松手时在光标所在的放下位置调用 `onDrop`。
- * 放下位置用 `data-drop="pinned" | "list" | "group:<id>"` 标记。按 Esc 取消。
+ * 放下位置用 `data-drop="pinned" | "list" | "group:<id>"` 标记。按 Esc、窗口失焦或
+ * 丢失指针（pointercancel、移动时已没有按键按下）时取消。
  */
 export function useAppDrag(onDrop: (appId: string, target: DropTarget) => void) {
   const [drag, setDrag] = useState<DragState | null>(null);
+  // 拖动状态同时放在 ref 中，事件处理直接读取；state 只用于渲染。
+  const dragRef = useRef<DragState | null>(null);
   const onDropRef = useRef(onDrop);
   onDropRef.current = onDrop;
   const pending = useRef<{
@@ -49,46 +63,61 @@ export function useAppDrag(onDrop: (appId: string, target: DropTarget) => void) 
   } | null>(null);
 
   useEffect(() => {
+    const update = (next: DragState | null) => {
+      dragRef.current = next;
+      setDrag(next);
+    };
+    const cancel = () => {
+      pending.current = null;
+      if (dragRef.current) update(null);
+    };
     const move = (e: PointerEvent) => {
       const start = pending.current;
       if (!start) return;
-      setDrag((current) => {
-        if (!current && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD) {
-          return null;
-        }
-        return {
-          appId: start.appId,
-          name: start.name,
-          from: start.from,
-          x: e.clientX,
-          y: e.clientY,
-          target: dropTargetAt(e.clientX, e.clientY),
-        };
+      // 松手事件丢失（如在窗口外松开）：鼠标移回时已没有按键按下，取消拖动。
+      if (e.buttons === 0) {
+        cancel();
+        return;
+      }
+      if (
+        !dragRef.current &&
+        Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD
+      ) {
+        return;
+      }
+      update({
+        appId: start.appId,
+        name: start.name,
+        from: start.from,
+        x: e.clientX,
+        y: e.clientY,
+        target: dropTargetAt(e.clientX, e.clientY),
       });
     };
     const end = (e: PointerEvent) => {
       const start = pending.current;
+      const dragged = dragRef.current !== null;
       pending.current = null;
-      setDrag((current) => {
-        if (current && start) {
-          const target = dropTargetAt(e.clientX, e.clientY);
-          if (target) queueMicrotask(() => onDropRef.current(start.appId, target));
-        }
-        return null;
-      });
+      if (!dragged) return;
+      update(null);
+      swallowNextClick();
+      const target = dropTargetAt(e.clientX, e.clientY);
+      if (start && target) onDropRef.current(start.appId, target);
     };
-    const cancel = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      pending.current = null;
-      setDrag(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cancel();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
-    window.addEventListener("keydown", cancel);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("blur", cancel);
+    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
-      window.removeEventListener("keydown", cancel);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("blur", cancel);
+      window.removeEventListener("keydown", onKey);
     };
   }, []);
 

@@ -17,7 +17,8 @@ type SettingsState = {
   error: string | null;
   load: () => Promise<void>;
   /** 乐观保存：先更新界面，失败时回滚并显示错误。 */
-  save: (patch: Partial<Settings>) => Promise<void>;
+  /** 保存设置，返回是否成功。 */
+  save: (patch: Partial<Settings>) => Promise<boolean>;
   /** 只更新界面、不写入设置文件，如拖动取色器时预览颜色；松手后再 `save`。 */
   preview: (patch: Partial<Settings>) => void;
   /** 置顶应用，排在已置顶应用之后；同时取消隐藏。 */
@@ -28,8 +29,8 @@ type SettingsState = {
   /** 隐藏应用；同时取消置顶。 */
   hideApp: (app: SavedApp) => Promise<void>;
   unhideApp: (appId: string) => Promise<void>;
-  /** 新建一个空分组（展开状态），返回其标识。 */
-  createGroup: () => Promise<string>;
+  /** 新建一个空分组（展开状态），返回其标识；保存失败时为 `null`。 */
+  createGroup: () => Promise<string | null>;
   /**
    * 把应用放入分组（离开原来的分组、取消置顶）。`volume` 为应用当前音量，
    * 换算为它在组音量 100% 时的音量，保证放入后实际音量不变。
@@ -43,8 +44,8 @@ type SettingsState = {
   deleteGroup: (groupId: string) => Promise<void>;
   /** 重命名应用；`alias` 为空时恢复原名。 */
   renameApp: (app: SavedApp, alias: string | null) => Promise<void>;
-  /** 把当前各应用的音量保存为新场景，返回其标识。 */
-  createScene: (apps: SceneApp[]) => Promise<string>;
+  /** 把当前各应用的音量保存为新场景，返回其标识；保存失败时为 `null`。 */
+  createScene: (apps: SceneApp[]) => Promise<string | null>;
   updateScene: (sceneId: string, patch: Partial<Omit<Scene, "id">>) => Promise<void>;
   deleteScene: (sceneId: string) => Promise<void>;
   /**
@@ -75,11 +76,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   defaults: null,
   error: null,
   load: async () => {
-    const [settings, defaults] = await Promise.all([
-      commands.getSettings(),
-      commands.getDefaultSettings(),
-    ]);
-    set({ settings, defaults });
+    try {
+      const [settings, defaults] = await Promise.all([
+        commands.getSettings(),
+        commands.getDefaultSettings(),
+      ]);
+      set({ settings, defaults });
+    } catch (e) {
+      console.error("读取设置失败", e);
+      set({ error: "读取设置失败" });
+    }
   },
   preview: (patch) => {
     const current = get().settings;
@@ -87,15 +93,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   save: async (patch) => {
     const previous = get().settings;
-    if (!previous) return;
+    if (!previous) return false;
     const next = { ...previous, ...patch };
     set({ settings: next });
     const result = await commands.setSettings(next);
     if (result.status === "error") {
-      set({ settings: previous, error: result.error.message });
-    } else {
-      set({ error: null });
+      // 以后端保存的设置为准，不回滚到自己保存前的快照：那会把之后已成功保存的修改一起抹掉。
+      const saved = await commands.getSettings().catch(() => previous);
+      set({ settings: saved, error: result.error.message });
+      return false;
     }
+    set({ error: null });
+    return true;
   },
   pinApp: async (app) => {
     const s = get().settings;
@@ -133,7 +142,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   createGroup: async () => {
     const id = `group-${Date.now().toString(36)}`;
     const s = get().settings;
-    if (!s) return id;
+    if (!s) return null;
     const group: AppGroup = {
       id,
       name: nextName(s.groups, "分组"),
@@ -141,8 +150,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       volume: 1,
       expanded: true,
     };
-    await get().save({ groups: [...s.groups, group] });
-    return id;
+    return (await get().save({ groups: [...s.groups, group] })) ? id : null;
   },
   addToGroup: async (groupId, app, volume) => {
     const s = get().settings;
@@ -207,10 +215,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   createScene: async (apps) => {
     const id = `scene-${Date.now().toString(36)}`;
     const s = get().settings;
-    if (!s) return id;
+    if (!s) return null;
     const scene: Scene = { id, name: nextName(s.scenes, "场景"), apps };
-    await get().save({ scenes: [...s.scenes, scene] });
-    return id;
+    return (await get().save({ scenes: [...s.scenes, scene] })) ? id : null;
   },
   updateScene: async (sceneId, patch) => {
     const s = get().settings;

@@ -33,13 +33,21 @@ type AudioState = {
 
 type CommandResult = { status: "ok"; data: null } | { status: "error"; error: AppError };
 
-/** 与后端一致：活跃在前，再按名称、AppId 排序。 */
+/**
+ * 按码点比较，与后端 Rust 的字符串比较一致。不能用 `localeCompare`：中文会按拼音排序，
+ * 与后端快照的顺序不同，每次更新单个应用时列表都会重新排序。
+ */
+function compareCodePoints(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** 与后端（`aggregate.rs`）一致：活跃在前，再按名称（不分大小写）、AppId 排序。 */
 function sortApps(apps: AppAudio[]): AppAudio[] {
   return [...apps].sort(
     (a, b) =>
       Number(b.active) - Number(a.active) ||
-      a.name.toLowerCase().localeCompare(b.name.toLowerCase()) ||
-      a.appId.localeCompare(b.appId),
+      compareCodePoints(a.name.toLowerCase(), b.name.toLowerCase()) ||
+      compareCodePoints(a.appId, b.appId),
   );
 }
 
@@ -104,7 +112,11 @@ export const useAudioStore = create<AudioState>((set, get) => {
         events.audioMaster.listen((e) => applyMaster(e.payload)),
         events.audioAppUpsert.listen((e) => applyUpsert(e.payload)),
         events.audioAppRemove.listen((e) => applyRemove(e.payload.appId)),
-      ]);
+      ]).catch((e: unknown) => {
+        // 订阅失败时仍然加载快照，至少能显示当前状态和“重试”，而不是一直停在骨架屏。
+        console.error("订阅音频事件失败", e);
+        return [];
+      });
 
       void listeners.then(load);
 

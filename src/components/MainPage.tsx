@@ -205,7 +205,7 @@ function AppItem({
   dragging,
   detailsDisabled,
   onDragStart,
-  onVolumeChange,
+  onVolumeCommit,
   ref,
 }: {
   app: AppAudio;
@@ -222,8 +222,8 @@ function AppItem({
   /** 拖动或重命名期间点击不显示详情。 */
   detailsDisabled: boolean;
   onDragStart: (e: React.PointerEvent) => void;
-  /** 分组内的应用单独调节时，需要同时记下它在组音量 100% 时的音量。 */
-  onVolumeChange?: (volume: number) => void;
+  /** 分组内的应用单独调节结束时，记下它在组音量 100% 时的音量（调节期间不写设置文件）。 */
+  onVolumeCommit?: (volume: number) => void;
   ref?: Ref<HTMLLIElement>;
 }) {
   const setAppVolume = useAudioStore((s) => s.setAppVolume);
@@ -348,8 +348,8 @@ function AppItem({
         onVolumeChange={(v) => {
           if (isDebug) debug.setVolume(app.appId, v);
           else setAppVolume(app.appId, v);
-          onVolumeChange?.(v);
         }}
+        onVolumeCommit={onVolumeCommit}
         onMuteChange={(m) => (isDebug ? debug.setMute(app.appId, m) : setAppMute(app.appId, m))}
       />
     </motion.li>
@@ -483,8 +483,8 @@ function GroupItem({
             volume,
           );
         }}
-        onVolumeCommit={() => {
-          if (dragVolume !== null) void updateGroup(group.id, { volume: dragVolume });
+        onVolumeCommit={(volume) => {
+          void updateGroup(group.id, { volume });
           setDragVolume(null);
         }}
         onMuteChange={(m) => setGroupMute(running.map((a) => a.appId), m)}
@@ -505,7 +505,7 @@ function GroupItem({
                 dragging={drag?.appId === app.appId}
                 detailsDisabled={!!drag || renaming !== null}
                 onDragStart={(e) => onDragStart(app, e)}
-                onVolumeChange={(v) => void setMemberVolume(group.id, app.appId, v)}
+                onVolumeCommit={(v) => void setMemberVolume(group.id, app.appId, v)}
               />
             ))}
           </AnimatePresence>
@@ -851,9 +851,9 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
             break;
           }
           case "new-group":
-            void createGroup().then((groupId) =>
-              addToGroup(groupId, savedOf(arg), volumeOf(arg)),
-            );
+            void createGroup().then((groupId) => {
+              if (groupId) void addToGroup(groupId, savedOf(arg), volumeOf(arg));
+            });
             break;
           case "toggle-group": {
             const group = groups.find((g) => g.id === arg);
@@ -937,7 +937,9 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
             label="把当前音量保存为场景"
             disabled={!all.some((a) => canRemember(a.appId))}
             onClick={() =>
-              void createScene(captureScene()).then((id) => setRenaming({ kind: "scene", id }))
+              void createScene(captureScene()).then((id) => {
+                if (id) setRenaming({ kind: "scene", id });
+              })
             }
           >
             <BookmarkPlus size={16} />

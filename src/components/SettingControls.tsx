@@ -146,8 +146,9 @@ export function NumberInput({
 
   const commit = () => {
     let next: number | null;
-    if (draft.trim() === "" && optional) {
-      next = null;
+    if (draft.trim() === "") {
+      // 清空：可选项表示“不设置”，否则恢复原值（`Number("")` 为 0，会被当成最小值）。
+      next = optional ? null : value;
     } else {
       const parsed = Number(draft);
       next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : value;

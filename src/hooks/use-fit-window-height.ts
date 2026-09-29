@@ -39,12 +39,19 @@ export function useFitWindowHeight(
           lastSent = height;
           clearTimeout(resizeEnd);
           scroll.style.overflowY = "hidden";
-          void commands.fitWindowHeight(height).then((ms) => {
-            // 期间又发起了新的调整时，由新的调整负责恢复。
-            if (lastSent !== height) return;
-            if (ms > 0) resizeEnd = setTimeout(endResize, ms);
-            else endResize();
-          });
+          void commands.fitWindowHeight(height).then(
+            (ms) => {
+              // 期间又发起了新的调整时，由新的调整负责恢复。
+              if (lastSent !== height) return;
+              if (ms > 0) resizeEnd = setTimeout(endResize, ms);
+              else endResize();
+            },
+            // 调整失败时也要恢复滚动条，并允许之后再次发送同一高度。
+            () => {
+              if (lastSent === height) lastSent = 0;
+              endResize();
+            },
+          );
         }
       });
     };

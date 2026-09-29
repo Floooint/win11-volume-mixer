@@ -13,8 +13,8 @@ type VolumeRowProps = {
   volume: VolumeState;
   onVolumeChange: (volume: number) => void;
   onMuteChange: (muted: boolean) => void;
-  /** 一次音量调节结束时调用（松开拖动、滚轮停止）。 */
-  onVolumeCommit?: () => void;
+  /** 一次音量调节结束时调用（松开拖动、滚轮停止、输入音量），参数为最终音量。 */
+  onVolumeCommit?: (volume: number) => void;
   /** 是否正在发声：高亮显示并出现“播放中”动画。`undefined` 表示不区分（如系统音量）。 */
   active?: boolean;
   /** 左侧的应用图标或占位字母。 */
@@ -39,13 +39,10 @@ function VolumeValue({
   name: string;
   volume: VolumeState;
   onChange: (volume: number) => void;
-  onCommit?: () => void;
+  onCommit?: (volume: number) => void;
 }) {
   const percent = Math.round(volume.volume * 100);
   const [draft, setDraft] = useState<string | null>(null);
-  // 确认后等界面按新音量重新渲染再调用：分组的 onCommit 读取的是渲染时记下的组音量。
-  const commitRef = useRef(onCommit);
-  commitRef.current = onCommit;
   // Esc 后让输入框失焦，由失焦统一结束；此标记让失焦时按“取消”处理。
   const cancelled = useRef(false);
 
@@ -53,8 +50,9 @@ function VolumeValue({
     const value = Number.parseInt(draft ?? "", 10);
     setDraft(null);
     if (cancelled.current || Number.isNaN(value)) return;
-    onChange(Math.min(100, Math.max(0, value)) / 100);
-    setTimeout(() => commitRef.current?.());
+    const volume = Math.min(100, Math.max(0, value)) / 100;
+    onChange(volume);
+    onCommit?.(volume);
   };
 
   if (draft !== null) {

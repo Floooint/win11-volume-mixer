@@ -27,8 +27,8 @@ type VolumeSliderProps = {
   value: number;
   /** 拖动、滚轮或键盘调节时调用，已节流。 */
   onChange: (value: number) => void;
-  /** 一次调节结束时调用：松开拖动、滚轮停止、键盘松开。 */
-  onCommit?: () => void;
+  /** 一次调节结束时调用，参数为最终音量：松开拖动、滚轮停止、键盘松开。数值没有变化时不调用。 */
+  onCommit?: (value: number) => void;
   muted?: boolean;
   label: string;
   /** 响应滚轮的区域，默认为滑块本身。传入整行可让鼠标在行内任意位置滚动调节。 */
@@ -55,8 +55,14 @@ export function VolumeSlider({
   const [local, setLocal] = useState(value);
   const localRef = useRef(value);
   const adjusting = useRef(false);
+  /** 本次调节改变过数值，结束时需要提交。 */
+  const dirty = useRef(false);
   const lastSent = useRef(0);
   const trailing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 节流中尚未发送的值。 */
+  const pending = useRef<number | null>(null);
+  /** 调节结束时递增，让下面的同步重新执行：调节期间被忽略的外部值此时补上。 */
+  const [sync, setSync] = useState(0);
   const wheelEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLSpanElement>(null);
 
@@ -66,12 +72,13 @@ export function VolumeSlider({
   onChangeRef.current = onChange;
   onCommitRef.current = onCommit;
 
+  // 依赖 sync：调节结束后即使外部值没再变化，也重新同步一次。
   useEffect(() => {
     if (!adjusting.current) {
       setLocal(value);
       localRef.current = value;
     }
-  }, [value]);
+  }, [value, sync]);
 
   useEffect(
     () => () => {
@@ -81,17 +88,24 @@ export function VolumeSlider({
     [],
   );
 
+  const emit = (next: number) => {
+    pending.current = null;
+    lastSent.current = Date.now();
+    onChangeRef.current(next);
+  };
+
   const send = (next: number) => {
     if (trailing.current) clearTimeout(trailing.current);
+    trailing.current = null;
     const wait = SEND_INTERVAL_MS - (Date.now() - lastSent.current);
     if (wait <= 0) {
-      lastSent.current = Date.now();
-      onChangeRef.current(next);
+      emit(next);
     } else {
       // 节流窗口内的最后一个值延后发送，保证最终值一定送达。
+      pending.current = next;
       trailing.current = setTimeout(() => {
-        lastSent.current = Date.now();
-        onChangeRef.current(next);
+        trailing.current = null;
+        emit(next);
       }, wait);
     }
   };
@@ -100,8 +114,27 @@ export function VolumeSlider({
     const clamped = Math.min(1, Math.max(0, Math.round(next * 100) / 100));
     if (clamped === localRef.current) return;
     localRef.current = clamped;
+    dirty.current = true;
     setLocal(clamped);
     send(clamped);
+  };
+
+  /**
+   * 一次调节结束：先立即发出节流中待发的值，再提交最终值（否则提交时最终值可能还没发出），
+   * 然后恢复与外部值同步。可以重复调用：数值没变过时不提交。只读 ref，滚轮监听中也可调用。
+   */
+  const finish = () => {
+    if (trailing.current) {
+      clearTimeout(trailing.current);
+      trailing.current = null;
+    }
+    if (pending.current !== null) emit(pending.current);
+    adjusting.current = false;
+    setSync((n) => n + 1);
+    if (dirty.current) {
+      dirty.current = false;
+      onCommitRef.current?.(localRef.current);
+    }
   };
 
   // 滚轮：向上增大、向下减小。须用非被动监听才能阻止外层列表同时滚动。
@@ -117,14 +150,11 @@ export function VolumeSlider({
       adjusting.current = true;
       update(localRef.current + (e.deltaY < 0 ? WHEEL_STEP : -WHEEL_STEP));
       if (wheelEnd.current) clearTimeout(wheelEnd.current);
-      wheelEnd.current = setTimeout(() => {
-        adjusting.current = false;
-        onCommitRef.current?.();
-      }, WHEEL_END_MS);
+      wheelEnd.current = setTimeout(finish, WHEEL_END_MS);
     };
     root.addEventListener("wheel", onWheel, { passive: false });
     return () => root.removeEventListener("wheel", onWheel);
-    // update 只读 ref，无需作为依赖。
+    // update、finish 只读 ref，无需作为依赖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wheelAreaRef, scrollAreaRef]);
 
@@ -146,11 +176,12 @@ export function VolumeSlider({
         if (ignoreNonPrimary(e)) return;
         adjusting.current = true;
       }}
+      // Radix 只在数值变化时调用 onValueCommit：按下后没拖动、拖回原值，或拖动中窗口失焦
+      // 丢失指针捕获时都不会调用，因此松开和丢失捕获时也要结束调节，否则之后一直忽略外部音量。
+      onPointerUp={finish}
+      onLostPointerCapture={finish}
       onValueChange={([v]) => update(v / 100)}
-      onValueCommit={() => {
-        adjusting.current = false;
-        onCommitRef.current?.();
-      }}
+      onValueCommit={finish}
     >
       <SliderPrimitive.Track className="relative h-1 grow overflow-hidden rounded-full bg-muted-foreground/25">
         <SliderPrimitive.Range className="absolute h-full rounded-full bg-primary" />

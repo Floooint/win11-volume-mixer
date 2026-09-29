@@ -718,9 +718,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </SettingRow>
               </Section>
 
-              {error && <p className="mt-2 px-4 text-xs text-destructive">{error}</p>}
             </>
           )}
+          {error && <p className="mt-2 px-4 text-xs text-destructive">{error}</p>}
         </div>
       </div>
     </div>
