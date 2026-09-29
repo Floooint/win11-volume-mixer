@@ -234,6 +234,12 @@ export type Settings_Deserialize = {
 	masterAtBottom?: boolean,
 	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。默认开启。 */
 	appsReversed?: boolean,
+	/**  标题栏显示“固定窗口”按钮。 */
+	showPinButton?: boolean,
+	/**  标题栏显示“新建分组”按钮。 */
+	showGroupButton?: boolean,
+	/**  标题栏显示“保存为场景”按钮。 */
+	showSceneButton?: boolean,
 	/**
 	 *  界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
 	 *  docs/architecture.md），界面简单，软件渲染也足够流畅。重启程序后生效。
@@ -283,6 +289,12 @@ export type Settings_Serialize = {
 	masterAtBottom: boolean,
 	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。默认开启。 */
 	appsReversed: boolean,
+	/**  标题栏显示“固定窗口”按钮。 */
+	showPinButton: boolean,
+	/**  标题栏显示“新建分组”按钮。 */
+	showGroupButton: boolean,
+	/**  标题栏显示“保存为场景”按钮。 */
+	showSceneButton: boolean,
 	/**
 	 *  界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
 	 *  docs/architecture.md），界面简单，软件渲染也足够流畅。重启程序后生效。

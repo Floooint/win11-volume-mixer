@@ -19,7 +19,7 @@ import {
   Switch,
 } from "@/components/SettingControls";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
-import { ACCENT_PRESETS, useSystemAccent } from "@/lib/accent";
+import { ACCENT_PRESETS, isCustomAccent, useSystemAccent } from "@/lib/accent";
 import { cn } from "@/lib/utils";
 import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
@@ -48,49 +48,70 @@ const THEMES: SelectOption<ThemeMode>[] = [
   { value: "dark", label: "深色" },
 ];
 
-/** 强调色：第一个色块为“跟随系统”，其余为预设色。 */
+/**
+ * 强调色：第一个色块为“跟随系统”，其余为预设色，最后是自定义颜色。
+ * 预设色按深浅主题调整亮度；自定义颜色原样使用（见 src/lib/accent.ts）。
+ */
 function AccentPicker({
   value,
   onChange,
+  onPreview,
 }: {
   value: string | null;
   onChange: (accent: string | null) => void;
+  /** 拖动取色器时预览，不保存。 */
+  onPreview: (accent: string) => void;
 }) {
   const system = useSystemAccent();
   const swatches = [
     { value: null, label: "跟随系统", color: system?.light ?? "#005FB8" },
     ...ACCENT_PRESETS.map((preset) => ({ ...preset, color: preset.value })),
   ];
+  const custom = isCustomAccent(value);
+  const [open, setOpen] = useState(false);
   return (
-    <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-2">
-      {swatches.map((swatch) => {
-        const selected = value === swatch.value;
-        return (
-          <Tooltip key={swatch.label} content={swatch.label}>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              aria-label={swatch.label}
-              onClick={() => onChange(swatch.value)}
-              style={{ backgroundColor: swatch.color }}
-              className={cn(
-                "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
-              )}
-            >
-              {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
-              {swatch.value === null && (
-                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
-                  A
-                </span>
-              )}
-            </button>
-          </Tooltip>
-        );
-      })}
-    </div>
+    <>
+      <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-2">
+        {swatches.map((swatch) => {
+          const selected = value === swatch.value;
+          return (
+            <Tooltip key={swatch.label} content={swatch.label}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                aria-label={swatch.label}
+                onClick={() => {
+                  setOpen(false);
+                  onChange(swatch.value);
+                }}
+                style={{ backgroundColor: swatch.color }}
+                className={cn(
+                  "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+                )}
+              >
+                {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
+                {swatch.value === null && (
+                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+                    A
+                  </span>
+                )}
+              </button>
+            </Tooltip>
+          );
+        })}
+        <CustomSwatch selected={custom} open={open} color={value} onClick={() => setOpen(!open)} />
+      </div>
+      {open && (
+        <ColorPicker
+          value={value ?? system?.light ?? "#005FB8"}
+          onPreview={onPreview}
+          onChange={onChange}
+        />
+      )}
+    </>
   );
 }
 
@@ -453,11 +474,15 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </SettingRow>
                 <SettingRow
                   title="强调色"
-                  help="滑块、开关等的颜色。第一个（A）跟随 Windows 强调色"
+                  help="滑块、开关等的颜色。第一个（A）跟随 Windows 强调色；最后一个为自定义颜色，按所选颜色原样显示"
                   isDefault={isDefault("accent")}
                   onReset={() => reset("accent")}
                   below={
-                    <AccentPicker value={settings.accent} onChange={(accent) => save({ accent })} />
+                    <AccentPicker
+                      value={settings.accent}
+                      onChange={(accent) => save({ accent })}
+                      onPreview={(accent) => preview({ accent })}
+                    />
                   }
                 />
                 <WidthSetting
@@ -487,6 +512,46 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     label="应用倒序排列"
                     checked={settings.appsReversed}
                     onChange={(appsReversed) => save({ appsReversed })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="显示固定窗口按钮"
+                  help="标题栏的图钉按钮：定住窗口，失焦时不自动隐藏。隐藏按钮时窗口恢复为失焦自动隐藏"
+                  isDefault={isDefault("showPinButton")}
+                  onReset={() => reset("showPinButton")}
+                >
+                  <Switch
+                    label="显示固定窗口按钮"
+                    checked={settings.showPinButton}
+                    onChange={(showPinButton) => {
+                      // 隐藏后无法再取消固定，先恢复为失焦自动隐藏。
+                      if (!showPinButton) void commands.setPinMode("normal");
+                      void save({ showPinButton });
+                    }}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="显示新建分组按钮"
+                  help="标题栏的新建分组按钮。隐藏后仍可在应用的右键菜单中选择“添加到分组 → 新建分组”"
+                  isDefault={isDefault("showGroupButton")}
+                  onReset={() => reset("showGroupButton")}
+                >
+                  <Switch
+                    label="显示新建分组按钮"
+                    checked={settings.showGroupButton}
+                    onChange={(showGroupButton) => save({ showGroupButton })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="显示保存场景按钮"
+                  help="标题栏的书签按钮：把当前各应用音量保存为场景。隐藏后不能新建场景，已有的场景照常显示和使用"
+                  isDefault={isDefault("showSceneButton")}
+                  onReset={() => reset("showSceneButton")}
+                >
+                  <Switch
+                    label="显示保存场景按钮"
+                    checked={settings.showSceneButton}
+                    onChange={(showSceneButton) => save({ showSceneButton })}
                   />
                 </SettingRow>
                 <SettingRow

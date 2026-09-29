@@ -157,6 +157,12 @@ pub struct Settings {
     pub master_at_bottom: bool,
     /// 应用列表倒序：活跃应用排在底部，更靠近任务栏。默认开启。
     pub apps_reversed: bool,
+    /// 标题栏显示“固定窗口”按钮。
+    pub show_pin_button: bool,
+    /// 标题栏显示“新建分组”按钮。
+    pub show_group_button: bool,
+    /// 标题栏显示“保存为场景”按钮。
+    pub show_scene_button: bool,
     /// 界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
     /// docs/architecture.md），界面简单，软件渲染也足够流畅。重启程序后生效。
     pub hardware_acceleration: bool,
@@ -199,6 +205,9 @@ impl Default for Settings {
             window_width: DEFAULT_WIDTH,
             master_at_bottom: true,
             apps_reversed: true,
+            show_pin_button: true,
+            show_group_button: true,
+            show_scene_button: true,
             hardware_acceleration: true,
             theme: ThemeMode::System,
             accent: None,
@@ -576,6 +585,9 @@ mod tests {
             window_width: 400,
             master_at_bottom: true,
             apps_reversed: true,
+            show_pin_button: true,
+            show_group_button: false,
+            show_scene_button: true,
             hardware_acceleration: true,
             theme: ThemeMode::Dark,
             accent: Some("#744DA9".into()),
@@ -594,7 +606,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"showPinButton":true,"showGroupButton":false,"showSceneButton":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
         );
     }
 

@@ -738,6 +738,10 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   const masterAtBottom = useSettingsStore((s) => s.settings?.masterAtBottom ?? true);
   const appsReversed = useSettingsStore((s) => s.settings?.appsReversed ?? true);
+  // 标题栏按钮可在设置中隐藏；设置加载前按默认值显示。
+  const showPinButton = useSettingsStore((s) => s.settings?.showPinButton ?? true);
+  const showGroupButton = useSettingsStore((s) => s.settings?.showGroupButton ?? true);
+  const showSceneButton = useSettingsStore((s) => s.settings?.showSceneButton ?? true);
   const autostartPrompt = useSettingsStore((s) => s.settings?.autostartPrompt ?? false);
 
   const device = snapshot?.device;
@@ -967,21 +971,25 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
               </IconButton>
             </>
           )}
-          <IconButton
-            label="把当前音量保存为场景"
-            disabled={!all.some((a) => canRemember(a.appId))}
-            onClick={() =>
-              void createScene(captureScene()).then((id) => {
-                if (id) setRenaming({ kind: "scene", id });
-              })
-            }
-          >
-            <BookmarkPlus size={16} />
-          </IconButton>
-          <IconButton label="新建分组" onClick={() => void createGroup()}>
-            <FolderPlus size={16} />
-          </IconButton>
-          <PinButton />
+          {showSceneButton && (
+            <IconButton
+              label="把当前音量保存为场景"
+              disabled={!all.some((a) => canRemember(a.appId))}
+              onClick={() =>
+                void createScene(captureScene()).then((id) => {
+                  if (id) setRenaming({ kind: "scene", id });
+                })
+              }
+            >
+              <BookmarkPlus size={16} />
+            </IconButton>
+          )}
+          {showGroupButton && (
+            <IconButton label="新建分组" onClick={() => void createGroup()}>
+              <FolderPlus size={16} />
+            </IconButton>
+          )}
+          {showPinButton && <PinButton />}
           <IconButton label="设置" onClick={onOpenSettings}>
             <SettingsIcon size={16} />
           </IconButton>
