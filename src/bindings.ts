@@ -202,6 +202,9 @@ export type Settings_Deserialize = {
 	groups?: AppGroup[],
 	/**  重命名的应用。 */
 	appAliases?: AppAlias[],
+	trayStyle?: TrayStyle,
+	/**  托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。 */
+	trayColor?: string | null,
 	/**  还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。 */
 	autostartPrompt?: boolean,
 };
@@ -238,6 +241,9 @@ export type Settings_Serialize = {
 	groups: AppGroup[],
 	/**  重命名的应用。 */
 	appAliases: AppAlias[],
+	trayStyle: TrayStyle,
+	/**  托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。 */
+	trayColor: string | null,
 	/**  还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。 */
 	autostartPrompt: boolean,
 };
@@ -246,6 +252,15 @@ export type Settings_Serialize = {
 export type ThemeMode = 
 /**  跟随 Windows 的“应用模式”。 */
 "system" | "light" | "dark";
+
+/**  托盘图标样式，见 `tray/glyph.rs`。 */
+export type TrayStyle = 
+/**  与 Windows 自带的音量图标一致，随音量分档变化。 */
+"speaker" | "headphones" | 
+/**  音符。 */
+"note" | 
+/**  显示音量数字。 */
+"number";
 
 export type VolumeState = {
 	volume: number,

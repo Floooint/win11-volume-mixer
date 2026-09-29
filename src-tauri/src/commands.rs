@@ -1,6 +1,6 @@
 //! Tauri 命令。只负责参数校验和转发，所有音频操作在音频线程上执行。
 
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::audio::{AudioService, AudioSnapshot, Command};
 use crate::config::{Config, Settings};
@@ -178,6 +178,7 @@ pub fn set_settings(
     // 结束宽度预览，按设置中的值调整；保存失败时即恢复为原来的宽度。
     crate::window::preview_width(&window, None);
     crate::window::apply_theme(&window);
+    crate::tray::schedule_refresh(window.app_handle());
     result
 }
 

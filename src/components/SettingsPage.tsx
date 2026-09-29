@@ -3,6 +3,7 @@ import {
   commands,
   type SavedApp,
   type ThemeMode,
+  type TrayStyle,
   type WindowPolicy_Serialize as WindowPolicy,
 } from "@/bindings";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
@@ -18,6 +19,7 @@ import {
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
 import { ACCENT_PRESETS, useSystemAccent } from "@/lib/accent";
 import { cn } from "@/lib/utils";
+import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
 
 const MODES: (SelectOption<WindowPolicy> & { hint: string })[] = [
@@ -84,6 +86,117 @@ function AccentPicker({
               </span>
             )}
           </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const TRAY_STYLES: SelectOption<TrayStyle>[] = [
+  { value: "speaker", label: "系统样式" },
+  { value: "headphones", label: "耳机" },
+  { value: "note", label: "音符" },
+  { value: "number", label: "音量数字" },
+];
+
+/** 托盘图标颜色：`null` 跟随任务栏（深色任务栏为白色，浅色为黑色）。偏亮的颜色在深色任务栏上更清楚。 */
+const TRAY_COLORS: { value: string | null; label: string }[] = [
+  { value: null, label: "跟随任务栏" },
+  { value: "#FFFFFF", label: "白" },
+  { value: "#000000", label: "黑" },
+  { value: "#60CDFF", label: "蓝" },
+  { value: "#6CCB5F", label: "绿" },
+  { value: "#FFD400", label: "黄" },
+  { value: "#FF8C00", label: "橙" },
+  { value: "#FF4F5E", label: "红" },
+  { value: "#C8A2FF", label: "紫" },
+];
+
+/** 与 `tray/glyph.rs` 中的字符一致。 */
+function trayGlyph(style: TrayStyle, volume: number, muted: boolean): string {
+  if (muted && (style === "speaker" || style === "number")) return "\uE74F";
+  switch (style) {
+    case "headphones":
+      return "\uE7F6";
+    case "note":
+      return "\uEC4F";
+    case "number":
+      return String(Math.round(volume * 100));
+    default: {
+      const percent = Math.round(volume * 100);
+      if (percent === 0) return "\uE992";
+      return percent <= 33 ? "\uE993" : percent <= 66 ? "\uE994" : "\uE995";
+    }
+  }
+}
+
+/** 在深色、浅色两种任务栏背景上预览托盘图标。 */
+function TrayPreview({ style, color }: { style: TrayStyle; color: string | null }) {
+  const master = useAudioStore((s) => s.snapshot?.device?.master);
+  const volume = master?.volume ?? 0.5;
+  const muted = master?.muted ?? false;
+  const text = trayGlyph(style, volume, muted);
+  const dim = muted && (style === "headphones" || style === "note");
+  return (
+    <div aria-hidden className="flex gap-1.5">
+      {[
+        { bg: "#1C1C1C", auto: "#FFFFFF" },
+        { bg: "#EEEEEE", auto: "#000000" },
+      ].map((bar) => (
+        <span
+          key={bar.bg}
+          style={{ backgroundColor: bar.bg, color: color ?? bar.auto }}
+          className="flex h-7 w-9 items-center justify-center rounded-md border border-border"
+        >
+          <span
+            style={{
+              fontFamily:
+                style === "number" && !muted
+                  ? '"Segoe UI", sans-serif'
+                  : '"Segoe Fluent Icons", "Segoe MDL2 Assets"',
+              opacity: dim ? 0.35 : 1,
+            }}
+            className={style === "number" && !muted ? "text-[11px] font-semibold" : "text-base"}
+          >
+            {text}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** 托盘图标颜色色块，第一个（A）跟随任务栏。 */
+function TrayColorPicker({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (color: string | null) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label="托盘图标颜色" className="mt-1.5 flex flex-wrap gap-2">
+      {TRAY_COLORS.map((swatch) => {
+        const selected = value === swatch.value;
+        return (
+          <button
+            key={swatch.label}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={swatch.label}
+            title={swatch.label}
+            onClick={() => onChange(swatch.value)}
+            style={{
+              background:
+                swatch.value ?? "linear-gradient(135deg, #FFFFFF 0 50%, #1C1C1C 50% 100%)",
+            }}
+            className={cn(
+              "relative size-6 rounded-full border border-border ring-offset-2 ring-offset-card transition-shadow",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+            )}
+          />
         );
       })}
     </div>
@@ -355,6 +468,34 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     label="应用倒序排列"
                     checked={settings.appsReversed}
                     onChange={(appsReversed) => save({ appsReversed })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="托盘图标"
+                  help="任务栏通知区域中的图标样式和颜色。颜色的第一项跟随任务栏深浅色：深色任务栏为白色，浅色为黑色"
+                  isDefault={isDefault("trayStyle") && isDefault("trayColor")}
+                  onReset={() =>
+                    defaults &&
+                    save({ trayStyle: defaults.trayStyle, trayColor: defaults.trayColor })
+                  }
+                  below={
+                    <>
+                      <TrayColorPicker
+                        value={settings.trayColor}
+                        onChange={(trayColor) => save({ trayColor })}
+                      />
+                      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        <TrayPreview style={settings.trayStyle} color={settings.trayColor} />
+                        预览：深色 / 浅色任务栏
+                      </div>
+                    </>
+                  }
+                >
+                  <Select
+                    label="托盘图标样式"
+                    value={settings.trayStyle}
+                    options={TRAY_STYLES}
+                    onChange={(trayStyle) => save({ trayStyle })}
                   />
                 </SettingRow>
               </Section>

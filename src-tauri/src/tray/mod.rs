@@ -1,5 +1,5 @@
 //! 系统托盘：左键显示 / 隐藏窗口，右键菜单打开或退出，中键切换静音，滚轮调节系统音量。
-//! 图标随系统音量和静音状态变化，颜色跟随任务栏深浅色。
+//! 图标随系统音量和静音状态变化；样式和颜色可在设置中选择，颜色默认跟随任务栏深浅色。
 
 mod glyph;
 mod theme;
@@ -13,8 +13,9 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{App, AppHandle, Manager, Position, Size};
 
 use crate::audio::{AudioService, Command, MasterStatus};
+use crate::config::Config;
 use crate::window::{self, Rect};
-use glyph::Level;
+use glyph::Icon;
 
 const TRAY_ID: &str = "main";
 const MENU_OPEN: &str = "open";
@@ -30,8 +31,8 @@ pub struct TrayState(Mutex<Inner>);
 struct Inner {
     /// 外层 `None` 表示还没收到过状态，此时保留程序图标。
     status: Option<Option<MasterStatus>>,
-    /// 当前图标对应的（音量档位、是否浅色、尺寸），相同时不重绘。
-    icon: Option<(Level, bool, u32)>,
+    /// 当前图标对应的（图标内容、颜色、尺寸），相同时不重绘。
+    icon: Option<(Icon, [u8; 3], u32)>,
     tooltip: String,
 }
 
@@ -103,7 +104,8 @@ pub fn show_status(app: &AppHandle, status: Option<MasterStatus>) {
     schedule_refresh(app);
 }
 
-fn schedule_refresh(app: &AppHandle) {
+/// 设置中的托盘样式或颜色变化后调用。
+pub fn schedule_refresh(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || refresh(&handle));
 }
@@ -119,16 +121,28 @@ fn refresh(app: &AppHandle) {
         return;
     };
 
+    let (style, color) = app
+        .state::<Config>()
+        .read(|s| (s.tray_style, s.tray_color.clone()));
+    let color =
+        color
+            .as_deref()
+            .and_then(glyph::parse_color)
+            .unwrap_or(if theme::taskbar_is_light() {
+                [0; 3]
+            } else {
+                [255; 3]
+            });
     let key = (
-        Level::of(status.as_ref().map(|s| s.volume)),
-        theme::taskbar_is_light(),
+        Icon::of(style, status.as_ref().map(|s| s.volume)),
+        color,
         glyph::icon_size(),
     );
-    if inner.icon != Some(key) {
-        let (level, light, size) = key;
+    if inner.icon.as_ref() != Some(&key) {
+        let (icon, color, size) = &key;
         // 字体缺失等原因绘制失败时保留原图标。
-        if let Some(rgba) = glyph::render(level, size, light) {
-            match tray.set_icon(Some(Image::new_owned(rgba, size, size))) {
+        if let Some(rgba) = glyph::render(icon, *size, *color) {
+            match tray.set_icon(Some(Image::new_owned(rgba, *size, *size))) {
                 Ok(()) => inner.icon = Some(key),
                 Err(e) => eprintln!("[tray] 更新图标失败：{e}"),
             }

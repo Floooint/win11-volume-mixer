@@ -51,6 +51,20 @@ pub enum ThemeMode {
     Dark,
 }
 
+/// 托盘图标样式，见 `tray/glyph.rs`。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum TrayStyle {
+    /// 与 Windows 自带的音量图标一致，随音量分档变化。
+    #[default]
+    Speaker,
+    Headphones,
+    /// 音符。
+    Note,
+    /// 显示音量数字。
+    Number,
+}
+
 /// 置顶或隐藏的应用。记下名称，应用没在运行时也能在设置页中显示。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +143,9 @@ pub struct Settings {
     pub groups: Vec<AppGroup>,
     /// 重命名的应用。
     pub app_aliases: Vec<AppAlias>,
+    pub tray_style: TrayStyle,
+    /// 托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。
+    pub tray_color: Option<String>,
     /// 还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。
     pub autostart_prompt: bool,
 }
@@ -151,6 +168,8 @@ impl Default for Settings {
             hidden_apps: Vec::new(),
             groups: Vec::new(),
             app_aliases: Vec::new(),
+            tray_style: TrayStyle::default(),
+            tray_color: None,
             autostart_prompt: false,
         }
     }
@@ -166,6 +185,7 @@ impl Settings {
             .animation_fps
             .map(|fps| fps.clamp(*FPS_RANGE.start(), *FPS_RANGE.end()));
         self.accent = self.accent.filter(|color| is_hex_color(color));
+        self.tray_color = self.tray_color.filter(|color| is_hex_color(color));
         self.pinned_apps = saved_apps(self.pinned_apps);
         self.hidden_apps = saved_apps(self.hidden_apps);
         self.groups = normalized_groups(self.groups);
@@ -310,6 +330,14 @@ impl Config {
         self.settings.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
+    /// 只读取需要的几项，不复制整份设置（托盘图标随音量频繁刷新时使用）。
+    pub fn read<T>(&self, f: impl FnOnce(&Settings) -> T) -> T {
+        match self.settings.lock() {
+            Ok(settings) => f(&settings),
+            Err(_) => f(&Settings::default()),
+        }
+    }
+
     /// 保存设置，返回修改前的值。
     pub fn set(&self, settings: Settings) -> AppResult<Settings> {
         let settings = settings.normalized();
@@ -404,11 +432,13 @@ mod tests {
             hidden_apps: Vec::new(),
             groups: Vec::new(),
             app_aliases: Vec::new(),
+            tray_style: TrayStyle::Number,
+            tray_color: Some("#FFFFFF".into()),
             autostart_prompt: false,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"autostartPrompt":false}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"trayStyle":"number","trayColor":"#FFFFFF","autostartPrompt":false}"##
         );
     }
 

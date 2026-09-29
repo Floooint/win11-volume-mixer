@@ -193,7 +193,7 @@ export function Select<T extends string>({
       <SelectPrimitive.Trigger
         aria-label={label}
         className={cn(
-          "inline-flex h-8 min-w-24 items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5",
+          "inline-flex h-8 min-w-24 shrink-0 items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 whitespace-nowrap",
           "transition-colors hover:bg-accent/60",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         )}
