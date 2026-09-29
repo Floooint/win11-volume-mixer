@@ -51,62 +51,45 @@ const THEMES: SelectOption<ThemeMode>[] = [
 function AccentPicker({
   value,
   onChange,
-  onPreview,
 }: {
   value: string | null;
   onChange: (accent: string | null) => void;
-  onPreview: (accent: string) => void;
 }) {
   const system = useSystemAccent();
   const swatches = [
     { value: null, label: "跟随系统", color: system?.light ?? "#005FB8" },
     ...ACCENT_PRESETS.map((preset) => ({ ...preset, color: preset.value })),
   ];
-  const custom = value !== null && !swatches.some((s) => s.value === value);
-  const [open, setOpen] = useState(false);
   return (
-    <>
-      <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-2">
-        {swatches.map((swatch) => {
-          const selected = value === swatch.value;
-          return (
-            <button
-              key={swatch.label}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              aria-label={swatch.label}
-              title={swatch.label}
-              onClick={() => {
-                setOpen(false);
-                onChange(swatch.value);
-              }}
-              style={{ backgroundColor: swatch.color }}
-              className={cn(
-                "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
-              )}
-            >
-              {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
-              {swatch.value === null && (
-                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
-                  A
-                </span>
-              )}
-            </button>
-          );
-        })}
-        <CustomSwatch selected={custom} open={open} color={value} onClick={() => setOpen(!open)} />
-      </div>
-      {open && (
-        <ColorPicker
-          value={value ?? system?.light ?? "#005FB8"}
-          onPreview={onPreview}
-          onChange={onChange}
-        />
-      )}
-    </>
+    <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-2">
+      {swatches.map((swatch) => {
+        const selected = value === swatch.value;
+        return (
+          <button
+            key={swatch.label}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={swatch.label}
+            title={swatch.label}
+            onClick={() => onChange(swatch.value)}
+            style={{ backgroundColor: swatch.color }}
+            className={cn(
+              "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+            )}
+          >
+            {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
+            {swatch.value === null && (
+              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+                A
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -478,7 +461,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     <AccentPicker
                       value={settings.accent}
                       onChange={(accent) => save({ accent })}
-                      onPreview={(accent) => preview({ accent })}
                     />
                   }
                 />

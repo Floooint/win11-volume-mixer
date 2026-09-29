@@ -256,7 +256,7 @@ function AppItem({
       transition={LIST_TRANSITION}
       // 停留 3 秒显示详情；分组内的应用行嵌在分组行中，进入 / 离开各自计算。
       onPointerEnter={(e) => !hoverDisabled && startHoverDetails(e, { app, alias: alias ?? null })}
-      onPointerLeave={leaveHoverDetails}
+      onPointerLeave={() => leaveHoverDetails(app.appId)}
       onPointerDown={cancelHoverDetails}
       onWheel={cancelHoverDetails}
       data-menu={menuData([

@@ -29,6 +29,7 @@ pub const LABEL: &str = "details";
 const WIDTH: f64 = 300.0;
 const GAP: f64 = 8.0;
 /// 鼠标离开应用行或浮窗后等多久隐藏：留出把鼠标移到浮窗上的时间。
+/// 与前端 `src/lib/hover-details.ts` 的 `HIDE_MS` 一致。
 const HIDE_DELAY: Duration = Duration::from_millis(1000);
 
 /// 浮窗显示的内容。
