@@ -11,6 +11,7 @@ mod error;
 mod events;
 mod feedback;
 mod icon;
+mod shell;
 mod tray;
 mod window;
 
@@ -49,6 +50,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_autostart,
             commands::show_app_details,
             commands::hide_app_details,
+            commands::hide_app_details_soon,
+            commands::set_details_hovered,
+            commands::reveal_in_folder,
             commands::get_app_details,
             commands::details_ready,
         ])

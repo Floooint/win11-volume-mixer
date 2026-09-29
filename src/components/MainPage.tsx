@@ -38,7 +38,7 @@ import { VolumeRow } from "@/components/VolumeRow";
 import { type DragState, type DropTarget, sameTarget, useAppDrag } from "@/hooks/use-app-drag";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
 import { type MenuItem, menuData, onMenuAction } from "@/lib/context-menu";
-import { cancelHoverDetails, startHoverDetails } from "@/lib/hover-details";
+import { cancelHoverDetails, leaveHoverDetails, startHoverDetails } from "@/lib/hover-details";
 import { cn } from "@/lib/utils";
 import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
@@ -256,7 +256,7 @@ function AppItem({
       transition={LIST_TRANSITION}
       // 停留 3 秒显示详情；分组内的应用行嵌在分组行中，进入 / 离开各自计算。
       onPointerEnter={(e) => !hoverDisabled && startHoverDetails(e, { app, alias: alias ?? null })}
-      onPointerLeave={cancelHoverDetails}
+      onPointerLeave={leaveHoverDetails}
       onPointerDown={cancelHoverDetails}
       onWheel={cancelHoverDetails}
       data-menu={menuData([
@@ -314,7 +314,20 @@ function AppItem({
         }
         volume={app.volume}
         active={app.active}
-        leading={<AppAvatar key={app.icon ?? ""} app={app} />}
+        leading={
+          remember ? (
+            // 图标也可以按住拖动，与左侧的拖动手柄相同。
+            <span
+              onPointerDown={onDragStart}
+              title="拖动到置顶区或分组"
+              className="block cursor-grab touch-none active:cursor-grabbing"
+            >
+              <AppAvatar key={app.icon ?? ""} app={app} />
+            </span>
+          ) : (
+            <AppAvatar key={app.icon ?? ""} app={app} />
+          )
+        }
         scrollAreaRef={scrollAreaRef}
         trailing={
           <>

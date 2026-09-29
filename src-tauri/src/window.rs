@@ -783,6 +783,21 @@ pub fn set_pin_mode<R: Runtime>(window: &WebviewWindow<R>, mode: PinMode) {
     }
 }
 
+/// 详情浮窗隐藏后调用：鼠标在浮窗上期间主窗口已失去焦点时，此时补上失焦隐藏。
+pub fn hide_if_unfocused<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = main_window(app) else {
+        return;
+    };
+    let state = app.state::<WindowState>();
+    if window.is_visible().unwrap_or(false)
+        && !window.is_focused().unwrap_or(true)
+        && pin_mode(app).hides_on_blur()
+        && !state.hold_open.load(Ordering::SeqCst)
+    {
+        hide(&window.as_ref().window());
+    }
+}
+
 /// 已回答首次运行的询问，窗口恢复失焦自动隐藏。
 pub fn release_hold<R: Runtime, M: Manager<R>>(manager: &M) {
     manager
@@ -821,6 +836,8 @@ pub fn handle_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) 
         WindowEvent::Focused(false)
             if window.is_visible().unwrap_or(false)
                 && pin_mode(window).hides_on_blur()
+                // 鼠标在详情浮窗上（如点击路径打开了资源管理器）：移出浮窗后再处理。
+                && !crate::details::is_hovered(window)
                 && !window
                     .state::<WindowState>()
                     .hold_open

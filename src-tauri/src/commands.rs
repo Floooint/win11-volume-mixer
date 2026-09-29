@@ -203,10 +203,32 @@ pub async fn show_app_details(
     crate::details::show(&app, details, anchor_top);
 }
 
+/// 在应用行上按下或滚动时立即隐藏详情浮窗。
 #[tauri::command]
 #[specta::specta]
 pub fn hide_app_details(app: tauri::AppHandle) {
     crate::details::hide(&app);
+}
+
+/// 鼠标离开应用行：稍后隐藏详情浮窗，期间鼠标移到浮窗上则保持显示。
+#[tauri::command]
+#[specta::specta]
+pub fn hide_app_details_soon(app: tauri::AppHandle) {
+    crate::details::hide_soon(&app);
+}
+
+/// 详情浮窗报告鼠标移入 / 移出。
+#[tauri::command]
+#[specta::specta]
+pub fn set_details_hovered(app: tauri::AppHandle, hovered: bool) {
+    crate::details::set_hovered(&app, hovered);
+}
+
+/// 在资源管理器中打开文件所在的文件夹并选中它（详情浮窗中点击路径）。
+#[tauri::command]
+#[specta::specta]
+pub fn reveal_in_folder(path: String) -> AppResult<()> {
+    crate::shell::reveal_in_folder(&path)
 }
 
 /// 详情浮窗首次加载时读取要显示的内容；之后的更新通过 `details://show` 事件推送。

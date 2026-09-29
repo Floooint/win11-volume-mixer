@@ -15,6 +15,8 @@ pub enum ErrorCode {
     AudioThreadDown,
     /// 设置文件读写失败。
     ConfigFailure,
+    /// 调用资源管理器等系统界面失败（如打开文件所在的文件夹）。
+    ShellFailure,
 }
 
 #[derive(Debug, Clone, Serialize, Type, thiserror::Error)]

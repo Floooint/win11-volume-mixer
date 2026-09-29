@@ -2,16 +2,45 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "re
 import { type AppDetails, commands, events } from "@/bindings";
 import { AppAvatar } from "@/components/AppAvatar";
 import { useApplyAccent, useSystemAccent } from "@/lib/accent";
+import { menuData, onMenuAction } from "@/lib/context-menu";
 import { cn } from "@/lib/utils";
 
+/** 一行信息。值可以选择，右键菜单中有“复制文字”（见 src/lib/context-menu.ts）。 */
 function Field({ label, children, mono }: { label: string; children: ReactNode; mono?: boolean }) {
   return (
     <div className="grid grid-cols-[4.5rem_1fr] gap-2">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn("min-w-0 break-all text-foreground", mono && "font-mono text-[11px]")}>
+      <dd
+        className={cn(
+          "min-w-0 break-all text-foreground select-text",
+          mono && "font-mono text-[11px]",
+        )}
+      >
         {children}
       </dd>
     </div>
+  );
+}
+
+/** 路径：点击在资源管理器中打开所在文件夹并选中该文件（不打开文件本身）。 */
+function PathLink({ path }: { path: string }) {
+  return (
+    <a
+      href="#"
+      draggable={false}
+      title="打开所在文件夹"
+      data-menu={menuData([
+        { label: "复制路径", value: path },
+        { label: "打开所在文件夹", action: "reveal" },
+      ])}
+      onClick={(e) => {
+        e.preventDefault();
+        void commands.revealInFolder(path);
+      }}
+      className="text-primary underline-offset-2 select-text hover:underline"
+    >
+      {path}
+    </a>
   );
 }
 
@@ -25,6 +54,16 @@ export function DetailsView() {
   const system = useSystemAccent();
   useApplyAccent(accent, system);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // 右键菜单“打开所在文件夹”。
+  useEffect(
+    () =>
+      onMenuAction((action) => {
+        const path = details?.app.exePath;
+        if (action === "reveal" && path) void commands.revealInFolder(path);
+      }),
+    [details],
+  );
 
   useEffect(() => {
     // 窗口尺寸即内容尺寸，不需要滚动条（尺寸调整的瞬间也不闪出滚动条）。
@@ -49,17 +88,29 @@ export function DetailsView() {
   const { app, alias } = details;
   const percent = Math.round(app.volume.volume * 100);
   return (
-    <div ref={contentRef} className="flex flex-col gap-3 p-3 text-xs">
+    // 鼠标在浮窗上时保持显示（离开应用行后浮窗会稍后隐藏，见 src-tauri/src/details.rs）。
+    <div
+      ref={contentRef}
+      onPointerEnter={() => void commands.setDetailsHovered(true)}
+      onPointerLeave={() => void commands.setDetailsHovered(false)}
+      className="flex flex-col gap-3 p-3 text-xs"
+    >
       <div className="flex items-center gap-3">
         <AppAvatar key={app.icon ?? ""} app={app} />
         <div className="min-w-0">
-          <p className="break-all text-sm font-semibold">{alias ?? app.name}</p>
-          {alias && <p className="break-all text-muted-foreground">原名：{app.name}</p>}
+          <p className="break-all text-sm font-semibold select-text">{alias ?? app.name}</p>
+          {alias && (
+            <p className="break-all text-muted-foreground select-text">原名：{app.name}</p>
+          )}
         </div>
       </div>
       <dl className="flex flex-col gap-1.5">
         {app.processName && <Field label="进程名">{app.processName}</Field>}
-        {app.exePath && <Field label="路径">{app.exePath}</Field>}
+        {app.exePath && (
+          <Field label="路径">
+            <PathLink path={app.exePath} />
+          </Field>
+        )}
         <Field label="标识" mono>
           {app.appId}
         </Field>

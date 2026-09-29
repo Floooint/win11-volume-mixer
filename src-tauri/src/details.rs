@@ -1,18 +1,25 @@
-//! 应用详情浮窗：鼠标在应用上停留 3 秒后，在主窗口旁（优先左侧）显示应用名、进程名、路径等。
+//! 应用详情浮窗：鼠标在应用上停留 1 秒后，在主窗口旁（优先左侧）显示应用名、进程名、路径等。
 //!
 //! 单独的无边框小窗口（与主窗口同样的 Mica 背景），带 `WS_EX_NOACTIVATE`，显示时不抢焦点，
 //! 主窗口不会因失焦而隐藏。首次需要时才创建，主窗口隐藏时销毁，平时不占内存。
 //!
 //! 流程：主窗口前端调用 [`show`] 记下要显示的内容和应用行的位置 → 浮窗前端渲染后
 //! 调用 [`ready`] 报告内容高度 → 后端据此定位并显示。内容更新通过 [`AppDetailsEvent`] 推送。
+//!
+//! 浮窗中的文字可以选择、右键复制，路径可点击打开所在文件夹，所以鼠标要能移到浮窗上：
+//! 离开应用行后稍等片刻才隐藏（[`hide_soon`]），期间移入浮窗则保持显示，移出浮窗后再隐藏。
+//! 鼠标在浮窗上时主窗口也不因失焦隐藏（如点击路径打开了资源管理器）。
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 use tauri_specta::Event;
 
+use crate::animation::Generation;
 use crate::audio::AppAudio;
 use crate::window::{MAIN, Rect};
 
@@ -21,6 +28,8 @@ pub const LABEL: &str = "details";
 /// 浮窗宽度与离主窗口的间距（逻辑像素）。
 const WIDTH: f64 = 300.0;
 const GAP: f64 = 8.0;
+/// 离开应用行后等多久隐藏：留出把鼠标移到浮窗上的时间。
+const HIDE_DELAY: Duration = Duration::from_millis(300);
 
 /// 浮窗显示的内容。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -44,11 +53,19 @@ struct Request {
 }
 
 #[derive(Default)]
-pub struct DetailsState(Mutex<Option<Request>>);
+pub struct DetailsState {
+    request: Mutex<Option<Request>>,
+    /// 鼠标在浮窗上。
+    hovered: AtomicBool,
+    /// 延迟隐藏的代数：显示、立即隐藏或再次延迟隐藏时递增，取消之前的延迟隐藏。
+    hide: Generation,
+}
 
 /// 显示某个应用的详情。`anchor_top` 为应用行的上边缘，相对主窗口内容区（逻辑像素）。
 pub fn show<R: Runtime>(app: &AppHandle<R>, details: AppDetails, anchor_top: f64) {
-    if let Ok(mut request) = app.state::<DetailsState>().0.lock() {
+    let state = app.state::<DetailsState>();
+    state.hide.next();
+    if let Ok(mut request) = state.request.lock() {
         *request = Some(Request {
             details: details.clone(),
             anchor_top,
@@ -71,16 +88,16 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, details: AppDetails, anchor_top: f64
 
 /// 浮窗前端首次加载时读取要显示的内容。
 pub fn current<R: Runtime>(app: &AppHandle<R>) -> Option<AppDetails> {
-    let request = app.state::<DetailsState>();
-    let request = request.0.lock().ok()?;
+    let state = app.state::<DetailsState>();
+    let request = state.request.lock().ok()?;
     request.as_ref().map(|r| r.details.clone())
 }
 
 /// 浮窗渲染完成，`content_height` 为内容高度（逻辑像素）。此时定位并显示（不激活）。
 pub fn ready<R: Runtime>(window: &WebviewWindow<R>, content_height: f64) {
     let anchor_top = {
-        let request = window.state::<DetailsState>();
-        let Ok(request) = request.0.lock() else {
+        let state = window.state::<DetailsState>();
+        let Ok(request) = state.request.lock() else {
             return;
         };
         // 渲染期间已经取消（鼠标移开）时不显示。
@@ -97,9 +114,12 @@ pub fn ready<R: Runtime>(window: &WebviewWindow<R>, content_height: f64) {
     }
 }
 
-/// 鼠标离开应用、开始拖动或滚动时隐藏。
+/// 在应用行上按下或滚动时立即隐藏。
 pub fn hide<R: Runtime, M: Manager<R>>(manager: &M) {
-    if let Ok(mut request) = manager.state::<DetailsState>().0.lock() {
+    let state = manager.state::<DetailsState>();
+    state.hide.next();
+    state.hovered.store(false, Ordering::SeqCst);
+    if let Ok(mut request) = state.request.lock() {
         *request = None;
     }
     if let Some(window) = manager.get_webview_window(LABEL) {
@@ -107,9 +127,46 @@ pub fn hide<R: Runtime, M: Manager<R>>(manager: &M) {
     }
 }
 
+/// 鼠标离开应用行或浮窗：稍等片刻，鼠标不在浮窗上才隐藏。
+/// 隐藏后若主窗口已失去焦点（鼠标在浮窗上期间点了别处），主窗口也按失焦处理。
+pub fn hide_soon<R: Runtime>(app: &AppHandle<R>) {
+    let generation = app.state::<DetailsState>().hide.next();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(HIDE_DELAY).await;
+        let state = app.state::<DetailsState>();
+        if !state.hide.is_current(generation) || state.hovered.load(Ordering::SeqCst) {
+            return;
+        }
+        hide(&app);
+        crate::window::hide_if_unfocused(&app);
+    });
+}
+
+/// 浮窗前端报告鼠标移入 / 移出浮窗。
+pub fn set_hovered<R: Runtime>(app: &AppHandle<R>, hovered: bool) {
+    let state = app.state::<DetailsState>();
+    state.hovered.store(hovered, Ordering::SeqCst);
+    if hovered {
+        state.hide.next();
+    } else {
+        hide_soon(app);
+    }
+}
+
+/// 鼠标是否在浮窗上。此时主窗口失焦也不隐藏。
+pub fn is_hovered<R: Runtime, M: Manager<R>>(manager: &M) -> bool {
+    manager
+        .try_state::<DetailsState>()
+        .is_some_and(|s| s.hovered.load(Ordering::SeqCst))
+}
+
 /// 主窗口隐藏时销毁浮窗，释放它的网页进程内存。
 pub fn destroy<R: Runtime, M: Manager<R>>(manager: &M) {
-    if let Ok(mut request) = manager.state::<DetailsState>().0.lock() {
+    let state = manager.state::<DetailsState>();
+    state.hide.next();
+    state.hovered.store(false, Ordering::SeqCst);
+    if let Ok(mut request) = state.request.lock() {
         *request = None;
     }
     if let Some(window) = manager.get_webview_window(LABEL) {
@@ -141,6 +198,11 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .theme(crate::window::theme_for(app))
         .build()?;
     set_no_activate(&window);
+    // 与主窗口相同的右键菜单：复制文字、复制路径等。
+    let handle = app.clone();
+    let _ = window.with_webview(move |webview| {
+        crate::context_menu::install(&handle, &webview.controller(), &webview.environment())
+    });
     Ok(())
 }
 
