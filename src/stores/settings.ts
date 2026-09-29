@@ -18,6 +18,8 @@ type SettingsState = {
   load: () => Promise<void>;
   /** 乐观保存：先更新界面，失败时回滚并显示错误。 */
   save: (patch: Partial<Settings>) => Promise<void>;
+  /** 只更新界面、不写入设置文件，如拖动取色器时预览颜色；松手后再 `save`。 */
+  preview: (patch: Partial<Settings>) => void;
   /** 置顶应用，排在已置顶应用之后；同时取消隐藏。 */
   pinApp: (app: SavedApp) => Promise<void>;
   unpinApp: (appId: string) => Promise<void>;
@@ -78,6 +80,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       commands.getDefaultSettings(),
     ]);
     set({ settings, defaults });
+  },
+  preview: (patch) => {
+    const current = get().settings;
+    if (current) set({ settings: { ...current, ...patch } });
   },
   save: async (patch) => {
     const previous = get().settings;

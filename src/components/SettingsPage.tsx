@@ -7,6 +7,7 @@ import {
   type WindowPolicy_Serialize as WindowPolicy,
 } from "@/bindings";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
+import { ColorPicker, CustomSwatch } from "@/components/ColorPicker";
 import { IconButton } from "@/components/IconButton";
 import {
   NumberInput,
@@ -50,45 +51,62 @@ const THEMES: SelectOption<ThemeMode>[] = [
 function AccentPicker({
   value,
   onChange,
+  onPreview,
 }: {
   value: string | null;
   onChange: (accent: string | null) => void;
+  onPreview: (accent: string) => void;
 }) {
   const system = useSystemAccent();
   const swatches = [
     { value: null, label: "跟随系统", color: system?.light ?? "#005FB8" },
     ...ACCENT_PRESETS.map((preset) => ({ ...preset, color: preset.value })),
   ];
+  const custom = value !== null && !swatches.some((s) => s.value === value);
+  const [open, setOpen] = useState(false);
   return (
-    <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-2">
-      {swatches.map((swatch) => {
-        const selected = value === swatch.value;
-        return (
-          <button
-            key={swatch.label}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            aria-label={swatch.label}
-            title={swatch.label}
-            onClick={() => onChange(swatch.value)}
-            style={{ backgroundColor: swatch.color }}
-            className={cn(
-              "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
-            )}
-          >
-            {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
-            {swatch.value === null && (
-              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
-                A
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-2">
+        {swatches.map((swatch) => {
+          const selected = value === swatch.value;
+          return (
+            <button
+              key={swatch.label}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={swatch.label}
+              title={swatch.label}
+              onClick={() => {
+                setOpen(false);
+                onChange(swatch.value);
+              }}
+              style={{ backgroundColor: swatch.color }}
+              className={cn(
+                "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+              )}
+            >
+              {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
+              {swatch.value === null && (
+                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+                  A
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <CustomSwatch selected={custom} open={open} color={value} onClick={() => setOpen(!open)} />
+      </div>
+      {open && (
+        <ColorPicker
+          value={value ?? system?.light ?? "#005FB8"}
+          onPreview={onPreview}
+          onChange={onChange}
+        />
+      )}
+    </>
   );
 }
 
@@ -170,36 +188,50 @@ function TrayPreview({ style, color }: { style: TrayStyle; color: string | null 
 function TrayColorPicker({
   value,
   onChange,
+  onPreview,
 }: {
   value: string | null;
   onChange: (color: string | null) => void;
+  onPreview: (color: string) => void;
 }) {
+  const custom = value !== null && !TRAY_COLORS.some((s) => s.value === value);
+  const [open, setOpen] = useState(false);
   return (
-    <div role="radiogroup" aria-label="托盘图标颜色" className="mt-1.5 flex flex-wrap gap-2">
-      {TRAY_COLORS.map((swatch) => {
-        const selected = value === swatch.value;
-        return (
-          <button
-            key={swatch.label}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            aria-label={swatch.label}
-            title={swatch.label}
-            onClick={() => onChange(swatch.value)}
-            style={{
-              background:
-                swatch.value ?? "linear-gradient(135deg, #FFFFFF 0 50%, #1C1C1C 50% 100%)",
-            }}
-            className={cn(
-              "relative size-6 rounded-full border border-border ring-offset-2 ring-offset-card transition-shadow",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
-            )}
-          />
-        );
-      })}
-    </div>
+    <>
+      <div role="radiogroup" aria-label="托盘图标颜色" className="mt-1.5 flex flex-wrap gap-2">
+        {TRAY_COLORS.map((swatch) => {
+          const selected = value === swatch.value;
+          return (
+            <button
+              key={swatch.label}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={swatch.label}
+              title={swatch.label}
+              onClick={() => {
+                setOpen(false);
+                onChange(swatch.value);
+              }}
+              style={{
+                background:
+                  swatch.value ?? "linear-gradient(135deg, #FFFFFF 0 50%, #1C1C1C 50% 100%)",
+              }}
+              className={cn(
+                "relative size-6 rounded-full border border-border ring-offset-2 ring-offset-card transition-shadow",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+              )}
+            />
+          );
+        })}
+        <CustomSwatch selected={custom} open={open} color={value} onClick={() => setOpen(!open)} />
+      </div>
+      {/* 托盘图标在保存后才重绘；拖动期间只更新下方的预览。 */}
+      {open && (
+        <ColorPicker value={value ?? "#FFFFFF"} onPreview={onPreview} onChange={onChange} />
+      )}
+    </>
   );
 }
 
@@ -342,6 +374,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const defaults = useSettingsStore((s) => s.defaults);
   const error = useSettingsStore((s) => s.error);
   const save = useSettingsStore((s) => s.save);
+  const preview = useSettingsStore((s) => s.preview);
   const unpinApp = useSettingsStore((s) => s.unpinApp);
   const unhideApp = useSettingsStore((s) => s.unhideApp);
   const renameApp = useSettingsStore((s) => s.renameApp);
@@ -445,6 +478,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     <AccentPicker
                       value={settings.accent}
                       onChange={(accent) => save({ accent })}
+                      onPreview={(accent) => preview({ accent })}
                     />
                   }
                 />
@@ -490,6 +524,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       <TrayColorPicker
                         value={settings.trayColor}
                         onChange={(trayColor) => save({ trayColor })}
+                        onPreview={(trayColor) => preview({ trayColor })}
                       />
                       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                         <TrayPreview style={settings.trayStyle} color={settings.trayColor} />
