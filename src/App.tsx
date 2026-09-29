@@ -1,4 +1,5 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+import { MotionConfig } from "motion/react";
 import { useEffect, useState } from "react";
 import { MainPage } from "@/components/MainPage";
 import { SettingsPage } from "@/components/SettingsPage";
@@ -19,17 +20,20 @@ export default function App() {
   useEffect(() => void loadSettings(), [loadSettings]);
 
   return (
-    <TooltipPrimitive.Provider delayDuration={300}>
-      <main className="h-screen overflow-hidden text-sm">
-        {/* 以页面为 key：切换时重新挂载并播放淡入动画。 */}
-        <div key={page} className="h-full motion-safe:animate-page-in">
-          {page === "main" ? (
-            <MainPage onOpenSettings={() => setPage("settings")} />
-          ) : (
-            <SettingsPage onBack={() => setPage("main")} />
-          )}
-        </div>
-      </main>
-    </TooltipPrimitive.Provider>
+    // 系统开启“减少动画”时，Motion 动画（列表等）只保留透明度变化。
+    <MotionConfig reducedMotion="user">
+      <TooltipPrimitive.Provider delayDuration={300}>
+        <main className="h-screen overflow-hidden text-sm">
+          {/* 以页面为 key：切换时重新挂载并播放淡入动画。 */}
+          <div key={page} className="h-full motion-safe:animate-page-in">
+            {page === "main" ? (
+              <MainPage onOpenSettings={() => setPage("settings")} />
+            ) : (
+              <SettingsPage onBack={() => setPage("main")} />
+            )}
+          </div>
+        </main>
+      </TooltipPrimitive.Provider>
+    </MotionConfig>
   );
 }

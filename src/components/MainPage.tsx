@@ -1,6 +1,8 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { AnimatePresence, motion } from "motion/react";
 import {
   type ReactNode,
+  type Ref,
   type RefObject,
   useEffect,
   useLayoutEffect,
@@ -111,12 +113,21 @@ function ErrorToast() {
   );
 }
 
+/** 列表动画的时长与曲线，与窗口高度动画（animation.rs 的 RESIZE）一致。 */
+const LIST_TRANSITION = { duration: 0.18, ease: [0.33, 1, 0.68, 1] } as const;
+
+/**
+ * 一个应用。出现时淡入，退出时原地淡出（`popLayout` 下立即让出位置，列表高度只变化一次，
+ * 由窗口高度动画过渡），排序变化时平滑移动到新位置。`ref` 由 `AnimatePresence` 使用。
+ */
 function AppItem({
   app,
   scrollAreaRef,
+  ref,
 }: {
   app: AppAudio;
   scrollAreaRef: RefObject<HTMLElement | null>;
+  ref?: Ref<HTMLLIElement>;
 }) {
   const setAppVolume = useAudioStore((s) => s.setAppVolume);
   const setAppMute = useAudioStore((s) => s.setAppMute);
@@ -124,7 +135,14 @@ function AppItem({
   const isDebug = app.appId.startsWith(DEBUG_APP_PREFIX);
 
   return (
-    <li
+    <motion.li
+      ref={ref}
+      // 只动画位置：用 transform 实现，不改变测得的内容高度。
+      layout="position"
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={LIST_TRANSITION}
       data-copy={copyData([
         { label: "应用名", value: app.name },
         app.processName && { label: "进程名", value: app.processName },
@@ -163,7 +181,7 @@ function AppItem({
         }
         onMuteChange={(m) => (isDebug ? debug.setMute(app.appId, m) : setAppMute(app.appId, m))}
       />
-    </li>
+    </motion.li>
   );
 }
 
@@ -247,7 +265,12 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         <h2 className="px-4 pt-1 pb-1 text-xs font-medium text-muted-foreground">应用</h2>
       )}
 
-      <div ref={scrollRef} className="scroll-area min-h-0 flex-1 overflow-y-auto">
+      {/* layoutScroll：列表滚动后，排序动画仍能算对位置。 */}
+      <motion.div
+        ref={scrollRef}
+        layoutScroll
+        className="scroll-area min-h-0 flex-1 overflow-y-auto"
+      >
         <div ref={contentRef} className={device && masterAtBottom ? "pb-2" : "pb-3"}>
           {snapshot === null && loadError ? (
             <EmptyState
@@ -279,14 +302,17 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
             />
           ) : (
             // 可滚动时滚轮用于滚动列表，不调节应用音量；系统音量不受影响。
-            <ul className="flex flex-col gap-1 pr-1 pl-3">
-              {apps.map((app) => (
-                <AppItem key={app.appId} app={app} scrollAreaRef={scrollRef} />
-              ))}
+            <ul className="relative flex flex-col gap-1 pr-1 pl-3">
+              {/* 首次显示不播放进入动画。 */}
+              <AnimatePresence initial={false} mode="popLayout">
+                {apps.map((app) => (
+                  <AppItem key={app.appId} app={app} scrollAreaRef={scrollRef} />
+                ))}
+              </AnimatePresence>
             </ul>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {device && masterAtBottom && <div className="pb-3">{masterSection}</div>}
 
