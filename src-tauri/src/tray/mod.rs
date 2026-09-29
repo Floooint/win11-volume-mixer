@@ -50,7 +50,7 @@ pub fn create(app: &App) -> tauri::Result<()> {
     theme::watch(move || schedule_refresh(&handle));
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip("Win11 声音控制器")
+        .tooltip("更优雅的音量控制器")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {

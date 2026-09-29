@@ -55,6 +55,15 @@ export function VolumeRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
+            {active && !volume.muted && (
+              <AudioLines
+                size={14}
+                animate
+                loop
+                aria-label="正在播放"
+                className="shrink-0 text-primary"
+              />
+            )}
             <p
               className={cn(
                 "truncate text-sm transition-colors",
@@ -65,15 +74,6 @@ export function VolumeRow({
             >
               {name}
             </p>
-            {active && !volume.muted && (
-              <AudioLines
-                size={14}
-                animate
-                loop
-                aria-label="正在播放"
-                className="shrink-0 text-primary"
-              />
-            )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <span className="text-xs tabular-nums text-muted-foreground">

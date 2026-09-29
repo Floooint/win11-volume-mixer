@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Win11 声音控制器",
+  "productName": "更优雅的音量控制器",
   "mainBinaryName": "win11-volume-mixer",
   "version": "0.1.0",
   "identifier": "com.floooint.volumemixer",
@@ -15,7 +15,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "Win11 声音控制器",
+        "title": "更优雅的音量控制器",
         "width": 340,
         "minWidth": 280,
         "maxWidth": 500,

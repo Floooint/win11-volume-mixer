@@ -207,7 +207,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <div ref={rootRef} className="relative flex h-full flex-col">
       <header className="flex items-center justify-between px-4 pt-3 pb-2">
-        <h1 className="text-sm font-semibold">音量</h1>
+        <h1 className="min-w-0 truncate text-sm font-semibold">更优雅的音量控制器</h1>
         <div className="flex items-center gap-0.5">
           {debugTools && (
             <>
