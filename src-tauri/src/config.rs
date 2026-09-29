@@ -36,6 +36,17 @@ pub enum WindowPolicy {
     Smart,
 }
 
+/// 界面深浅色。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ThemeMode {
+    /// 跟随 Windows 的“应用模式”。
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -57,6 +68,9 @@ pub struct Settings {
     /// 界面使用 GPU 渲染。关闭时窗口显示期间少占约 70 MB 内存（实测见 docs/architecture.md），
     /// 界面简单，软件渲染足够流畅。重启程序后生效。
     pub hardware_acceleration: bool,
+    pub theme: ThemeMode,
+    /// 强调色 `#RRGGBB`；`None` 表示跟随 Windows 强调色。
+    pub accent: Option<String>,
 }
 
 impl Default for Settings {
@@ -71,6 +85,8 @@ impl Default for Settings {
             master_at_bottom: false,
             apps_reversed: false,
             hardware_acceleration: false,
+            theme: ThemeMode::System,
+            accent: None,
         }
     }
 }
@@ -84,11 +100,17 @@ impl Settings {
         self.animation_fps = self
             .animation_fps
             .map(|fps| fps.clamp(*FPS_RANGE.start(), *FPS_RANGE.end()));
+        self.accent = self.accent.filter(|color| is_hex_color(color));
         self.window_width = self
             .window_width
             .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
         self
     }
+}
+
+/// 是否为 `#RRGGBB` 格式，防止设置文件中的异常值被写进 CSS。
+fn is_hex_color(color: &str) -> bool {
+    color.len() == 7 && color.starts_with('#') && color[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// 设置的内存副本，Tauri 全局状态。
@@ -207,10 +229,12 @@ mod tests {
             master_at_bottom: true,
             apps_reversed: true,
             hardware_acceleration: true,
+            theme: ThemeMode::Dark,
+            accent: Some("#744DA9".into()),
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r#"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true}"#
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9"}"##
         );
     }
 
@@ -240,6 +264,21 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(too_large.normalized().smart_release_seconds, 600);
+    }
+
+    #[test]
+    fn 格式错误的强调色被忽略() {
+        let settings = |accent: &str| Settings {
+            accent: Some(accent.into()),
+            ..Settings::default()
+        };
+        assert_eq!(
+            settings("#744DA9").normalized().accent.as_deref(),
+            Some("#744DA9")
+        );
+        assert_eq!(settings("red").normalized().accent, None);
+        assert_eq!(settings("#12345G").normalized().accent, None);
+        assert_eq!(settings("#123;}").normalized().accent, None);
     }
 
     #[test]

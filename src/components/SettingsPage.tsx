@@ -1,5 +1,9 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { commands, type WindowPolicy_Serialize as WindowPolicy } from "@/bindings";
+import {
+  commands,
+  type ThemeMode,
+  type WindowPolicy_Serialize as WindowPolicy,
+} from "@/bindings";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
 import { IconButton } from "@/components/IconButton";
 import {
@@ -11,6 +15,8 @@ import {
   Switch,
 } from "@/components/SettingControls";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
+import { ACCENT_PRESETS, useSystemAccent } from "@/lib/accent";
+import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/stores/settings";
 
 const MODES: (SelectOption<WindowPolicy> & { hint: string })[] = [
@@ -30,6 +36,58 @@ const MODES_HELP = (
     ))}
   </>
 );
+
+const THEMES: SelectOption<ThemeMode>[] = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];
+
+/** 强调色：第一个色块为“跟随系统”，其余为预设色。 */
+function AccentPicker({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (accent: string | null) => void;
+}) {
+  const system = useSystemAccent();
+  const swatches = [
+    { value: null, label: "跟随系统", color: system?.light ?? "#005FB8" },
+    ...ACCENT_PRESETS.map((preset) => ({ ...preset, color: preset.value })),
+  ];
+  return (
+    <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-2">
+      {swatches.map((swatch) => {
+        const selected = value === swatch.value;
+        return (
+          <button
+            key={swatch.label}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={swatch.label}
+            title={swatch.label}
+            onClick={() => onChange(swatch.value)}
+            style={{ backgroundColor: swatch.color }}
+            className={cn(
+              "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+            )}
+          >
+            {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
+            {swatch.value === null && (
+              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+                A
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 /** 与后端 `SMART_SECONDS_RANGE` 保持一致。 */
 const MIN_SECONDS = 10;
@@ -207,6 +265,31 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               </Section>
 
               <Section title="外观">
+                <SettingRow
+                  title="主题"
+                  help="界面的深浅色，跟随系统时与 Windows 的“应用模式”一致"
+                  isDefault={isDefault("theme")}
+                  onReset={() => reset("theme")}
+                >
+                  <Select
+                    label="主题"
+                    value={settings.theme}
+                    options={THEMES}
+                    onChange={(theme) => save({ theme })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="强调色"
+                  help="滑块、开关等的颜色。第一个（A）跟随 Windows 强调色"
+                  isDefault={isDefault("accent")}
+                  onReset={() => reset("accent")}
+                  below={
+                    <AccentPicker
+                      value={settings.accent}
+                      onChange={(accent) => save({ accent })}
+                    />
+                  }
+                />
                 <WidthSetting
                   value={settings.windowWidth}
                   defaultValue={defaults?.windowWidth}

@@ -14,7 +14,7 @@ use tauri::{
 };
 
 use crate::animation::{self, Generation};
-use crate::config::{Config, WIDTH_RANGE, WindowPolicy};
+use crate::config::{Config, ThemeMode, WIDTH_RANGE, WindowPolicy};
 
 pub const MAIN: &str = "main";
 
@@ -198,6 +198,24 @@ fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(MAIN)
 }
 
+/// 设置中的深浅色对应的窗口主题。`None` 跟随系统。
+/// 窗口主题同时决定 Mica 背景的深浅和网页的 `prefers-color-scheme`。
+fn window_theme(mode: ThemeMode) -> Option<tauri::Theme> {
+    match mode {
+        ThemeMode::System => None,
+        ThemeMode::Light => Some(tauri::Theme::Light),
+        ThemeMode::Dark => Some(tauri::Theme::Dark),
+    }
+}
+
+/// 设置变化后立即应用深浅色。
+pub fn apply_theme<R: Runtime>(window: &WebviewWindow<R>) {
+    let mode = window.state::<Config>().get().theme;
+    if let Err(e) = window.set_theme(window_theme(mode)) {
+        eprintln!("[window] 切换深浅色失败：{e}");
+    }
+}
+
 /// WebView2 启动参数。设置后会替换 wry 的默认参数，因此要把默认参数一并带上。
 fn browser_args(hardware_acceleration: bool) -> String {
     // wry 的默认参数：去掉选中文字时的迷你菜单和 SmartScreen。
@@ -222,8 +240,10 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .state::<WindowState>()
         .hardware_acceleration
         .get_or_init(|| app.state::<Config>().get().hardware_acceleration);
+    let theme = window_theme(app.state::<Config>().get().theme);
     let window = WebviewWindowBuilder::from_config(app, config)?
         .additional_browser_args(&browser_args(hardware_acceleration))
+        .theme(theme)
         .build()?;
     disable_system_transitions(&window);
     let handle = app.clone();

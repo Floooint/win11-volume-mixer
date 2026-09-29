@@ -7,14 +7,18 @@
 :root {
   --radius: 0.5rem;
 
+  /* 强调色：浅色 / 深色主题各一个。默认为 Windows 11 默认强调色 #005FB8 / #60CDFF，
+     运行时由 src/lib/accent.ts 按系统强调色或用户选择覆盖。 */
+  --accent-light: #005fb8;
+  --accent-dark: #60cdff;
+
   --background: oklch(0.975 0 0);
   --foreground: oklch(0.2 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.2 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.2 0 0);
-  /* Windows 11 默认强调色 #005FB8 */
-  --primary: oklch(0.49 0.15 253);
+  --primary: var(--accent-light);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.94 0 0);
   --secondary-foreground: oklch(0.2 0 0);
@@ -25,7 +29,7 @@
   --destructive: oklch(0.55 0.2 27);
   --border: oklch(0.89 0 0);
   --input: oklch(0.89 0 0);
-  --ring: oklch(0.49 0.15 253);
+  --ring: var(--accent-light);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,8 +40,7 @@
     --card-foreground: oklch(0.97 0 0);
     --popover: oklch(0.26 0 0);
     --popover-foreground: oklch(0.97 0 0);
-    /* 深色模式强调色 #60CDFF */
-    --primary: oklch(0.81 0.12 228);
+    --primary: var(--accent-dark);
     --primary-foreground: oklch(0.2 0 0);
     --secondary: oklch(0.3 0 0);
     --secondary-foreground: oklch(0.97 0 0);
@@ -48,7 +51,7 @@
     --destructive: oklch(0.65 0.2 25);
     --border: oklch(1 0 0 / 12%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.81 0.12 228);
+    --ring: var(--accent-dark);
   }
 }
 

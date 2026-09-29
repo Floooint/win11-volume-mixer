@@ -1,3 +1,4 @@
+mod accent;
 mod animation;
 mod audio;
 mod autostart;
@@ -39,6 +40,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_settings,
             commands::preview_window_width,
             commands::get_autostart,
+            commands::get_accent_colors,
             commands::set_autostart,
         ])
         .events(collect_events![
@@ -46,6 +48,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::MasterChangedEvent,
             events::AppUpsertEvent,
             events::AppRemoveEvent,
+            accent::AccentColors,
         ])
 }
 
@@ -74,6 +77,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .manage(window::WindowState::default())
+        .manage(accent::AccentWatcher::default())
         .manage(feedback::Feedback::default())
         .manage(icon::IconService::start())
         .register_asynchronous_uri_scheme_protocol(icon::SCHEME, |ctx, request, responder| {
@@ -95,6 +99,7 @@ pub fn run() {
                 Update::MasterStatus(status) => tray::show_status(&handle, status),
                 update => events::emit(&handle, update),
             }));
+            accent::watch(app.handle());
             tray::create(app)?;
             window::init(app.handle())?;
             Ok(())

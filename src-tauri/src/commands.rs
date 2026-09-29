@@ -96,6 +96,13 @@ pub fn get_settings(config: State<'_, Config>) -> Settings {
     config.get()
 }
 
+/// 当前 Windows 强调色，之后的变化通过 `theme://accent` 事件推送。读取失败时为 `None`。
+#[tauri::command]
+#[specta::specta]
+pub fn get_accent_colors() -> Option<crate::accent::AccentColors> {
+    crate::accent::current()
+}
+
 /// 是否开机自启（读取系统中的实际注册状态）。
 #[tauri::command]
 #[specta::specta]
@@ -127,6 +134,7 @@ pub fn set_settings(
     let result = config.set(settings).map(|_| ());
     // 结束宽度预览，按设置中的值调整；保存失败时即恢复为原来的宽度。
     crate::window::preview_width(&window, None);
+    crate::window::apply_theme(&window);
     result
 }
 

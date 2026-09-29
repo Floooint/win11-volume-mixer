@@ -32,6 +32,11 @@ export const commands = {
 	previewWindowWidth: (width: number) => __TAURI_INVOKE<void>("preview_window_width", { width }),
 	/**  是否开机自启（读取系统中的实际注册状态）。 */
 	getAutostart: () => __TAURI_INVOKE<boolean>("get_autostart"),
+	/**  当前 Windows 强调色，之后的变化通过 `theme://accent` 事件推送。读取失败时为 `None`。 */
+	getAccentColors: () => __TAURI_INVOKE<{
+	light: string,
+	dark: string,
+} | null>("get_accent_colors"),
 	setAutostart: (enabled: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_autostart", { enabled })),
 };
 
@@ -41,9 +46,16 @@ export const events = {
 	audioAppUpsert: makeEvent<AppUpsertEvent>("audio://app-upsert"),
 	audioMaster: makeEvent<MasterChangedEvent>("audio://master"),
 	audioSnapshot: makeEvent<AudioSnapshotEvent>("audio://snapshot"),
+	themeAccent: makeEvent<AccentColors>("theme://accent"),
 };
 
 /* Types */
+/**  浅色、深色主题下的强调色，`#RRGGBB`。 */
+export type AccentColors = {
+	light: string,
+	dark: string,
+};
+
 export type AppAudio = {
 	appId: string,
 	name: string,
@@ -130,6 +142,9 @@ export type Settings_Deserialize = {
 	 *  界面简单，软件渲染足够流畅。重启程序后生效。
 	 */
 	hardwareAcceleration?: boolean,
+	theme?: ThemeMode,
+	/**  强调色 `#RRGGBB`；`None` 表示跟随 Windows 强调色。 */
+	accent?: string | null,
 };
 
 export type Settings_Serialize = {
@@ -153,7 +168,15 @@ export type Settings_Serialize = {
 	 *  界面简单，软件渲染足够流畅。重启程序后生效。
 	 */
 	hardwareAcceleration: boolean,
+	theme: ThemeMode,
+	/**  强调色 `#RRGGBB`；`None` 表示跟随 Windows 强调色。 */
+	accent: string | null,
 };
+
+/**  界面深浅色。 */
+export type ThemeMode = 
+/**  跟随 Windows 的“应用模式”。 */
+"system" | "light" | "dark";
 
 export type VolumeState = {
 	volume: number,
