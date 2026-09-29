@@ -247,6 +247,14 @@ export type Settings_Deserialize = {
 	/**  音量场景，按显示顺序排列。 */
 	scenes?: Scene[],
 	trayStyle?: TrayStyle,
+	/**  在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。 */
+	taskbarWheel?: boolean,
+	/**  托盘 / 任务栏滚轮每格调节的百分点（2–10 的偶数）。 */
+	wheelStep?: number,
+	/**  托盘 / 任务栏滚轮停止后播放提示音。 */
+	wheelFeedback?: boolean,
+	/**  托盘 / 任务栏滚轮调节时显示 Windows 自带的音量浮层。 */
+	wheelOsd?: boolean,
 	/**  托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。 */
 	trayColor?: string | null,
 	/**  还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。 */
@@ -288,6 +296,14 @@ export type Settings_Serialize = {
 	/**  音量场景，按显示顺序排列。 */
 	scenes: Scene[],
 	trayStyle: TrayStyle,
+	/**  在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。 */
+	taskbarWheel: boolean,
+	/**  托盘 / 任务栏滚轮每格调节的百分点（2–10 的偶数）。 */
+	wheelStep: number,
+	/**  托盘 / 任务栏滚轮停止后播放提示音。 */
+	wheelFeedback: boolean,
+	/**  托盘 / 任务栏滚轮调节时显示 Windows 自带的音量浮层。 */
+	wheelOsd: boolean,
 	/**  托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。 */
 	trayColor: string | null,
 	/**  还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。 */

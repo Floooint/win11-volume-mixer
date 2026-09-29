@@ -175,6 +175,8 @@ pub fn set_settings(
         crate::window::release_hold(&window);
     }
     let result = config.set(settings).map(|_| ());
+    // 按保存后的设置（保存失败时即原来的设置）开启或关闭任务栏滚轮。
+    crate::tray::set_taskbar_wheel(window.app_handle(), config.read(|s| s.taskbar_wheel));
     // 结束宽度预览，按设置中的值调整；保存失败时即恢复为原来的宽度。
     crate::window::preview_width(&window, None);
     crate::window::apply_theme(&window);

@@ -21,6 +21,10 @@ const PATH_ENV: &str = "VOLUME_MIXER_SETTINGS";
 pub const SMART_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
 const DEFAULT_SMART_SECONDS: u32 = 300;
 
+/// 托盘 / 任务栏滚轮每格调节的百分点。必须是偶数：显示系统音量浮层时，最后 2% 由系统调节。
+pub const WHEEL_STEP_RANGE: std::ops::RangeInclusive<u32> = 2..=10;
+const DEFAULT_WHEEL_STEP: u32 = 2;
+
 /// 窗口宽度范围（逻辑像素），须与 `tauri.conf.json` 的 `minWidth` / `maxWidth` 一致。
 pub const WIDTH_RANGE: std::ops::RangeInclusive<u32> = 280..=500;
 const DEFAULT_WIDTH: u32 = 340;
@@ -167,6 +171,14 @@ pub struct Settings {
     /// 音量场景，按显示顺序排列。
     pub scenes: Vec<Scene>,
     pub tray_style: TrayStyle,
+    /// 在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。
+    pub taskbar_wheel: bool,
+    /// 托盘 / 任务栏滚轮每格调节的百分点（2–10 的偶数）。
+    pub wheel_step: u32,
+    /// 托盘 / 任务栏滚轮停止后播放提示音。
+    pub wheel_feedback: bool,
+    /// 托盘 / 任务栏滚轮调节时显示 Windows 自带的音量浮层。
+    pub wheel_osd: bool,
     /// 托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。
     pub tray_color: Option<String>,
     /// 还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。
@@ -193,6 +205,10 @@ impl Default for Settings {
             app_aliases: Vec::new(),
             scenes: Vec::new(),
             tray_style: TrayStyle::default(),
+            taskbar_wheel: false,
+            wheel_step: DEFAULT_WHEEL_STEP,
+            wheel_feedback: true,
+            wheel_osd: false,
             tray_color: None,
             autostart_prompt: false,
         }
@@ -218,6 +234,9 @@ impl Settings {
         self.window_width = self
             .window_width
             .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
+        // 奇数向下取偶数，再限制范围。
+        self.wheel_step =
+            (self.wheel_step / 2 * 2).clamp(*WHEEL_STEP_RANGE.start(), *WHEEL_STEP_RANGE.end());
         self
     }
 }
@@ -450,6 +469,7 @@ mod tests {
             !settings.hardware_acceleration,
             "默认关闭硬件加速以节省内存"
         );
+        assert!(!settings.taskbar_wheel, "默认只在托盘图标上响应滚轮");
     }
 
     #[test]
@@ -478,12 +498,16 @@ mod tests {
             app_aliases: Vec::new(),
             scenes: Vec::new(),
             tray_style: TrayStyle::Number,
+            taskbar_wheel: true,
+            wheel_step: 4,
+            wheel_feedback: false,
+            wheel_osd: true,
             tray_color: Some("#FFFFFF".into()),
             autostart_prompt: false,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"trayStyle":"number","trayColor":"#FFFFFF","autostartPrompt":false}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
         );
     }
 
@@ -649,6 +673,18 @@ mod tests {
         assert_eq!(settings(100).normalized().window_width, 280);
         assert_eq!(settings(9999).normalized().window_width, 500);
         assert_eq!(settings(450).normalized().window_width, 450);
+    }
+
+    #[test]
+    fn 滚轮步长为2到10的偶数() {
+        let settings = |wheel_step| Settings {
+            wheel_step,
+            ..Settings::default()
+        };
+        assert_eq!(settings(0).normalized().wheel_step, 2);
+        assert_eq!(settings(5).normalized().wheel_step, 4);
+        assert_eq!(settings(8).normalized().wheel_step, 8);
+        assert_eq!(settings(99).normalized().wheel_step, 10);
     }
 
     #[test]

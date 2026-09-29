@@ -203,6 +203,12 @@ function TrayColorPicker({
   );
 }
 
+/** 与后端 `config::WHEEL_STEP_RANGE` 保持一致：2–10 的偶数。 */
+type WheelStep = "2" | "4" | "6" | "8" | "10";
+const WHEEL_STEPS: SelectOption<WheelStep>[] = (["2", "4", "6", "8", "10"] as const).map(
+  (value) => ({ value, label: `${value}%` }),
+);
+
 /** 与后端 `SMART_SECONDS_RANGE` 保持一致。 */
 const MIN_SECONDS = 10;
 const MAX_SECONDS = 600;
@@ -571,10 +577,62 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </Section>
               )}
 
+              <Section title="滚轮">
+                <SettingRow
+                  title="任务栏滚轮"
+                  help="在任务栏任意位置滚动滚轮调节系统音量。关闭时只在托盘图标上响应滚轮"
+                  isDefault={isDefault("taskbarWheel")}
+                  onReset={() => reset("taskbarWheel")}
+                >
+                  <Switch
+                    label="任务栏滚轮"
+                    checked={settings.taskbarWheel}
+                    onChange={(taskbarWheel) => save({ taskbarWheel })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="每格音量"
+                  help="在托盘图标或任务栏上滚动一格调节的音量"
+                  isDefault={isDefault("wheelStep")}
+                  onReset={() => reset("wheelStep")}
+                >
+                  <Select
+                    label="每格音量"
+                    value={String(settings.wheelStep) as WheelStep}
+                    options={WHEEL_STEPS}
+                    onChange={(step) => save({ wheelStep: Number(step) })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="滚轮提示音"
+                  help="在托盘图标或任务栏上滚动停止后播放提示音，声音大小即当前音量"
+                  isDefault={isDefault("wheelFeedback")}
+                  onReset={() => reset("wheelFeedback")}
+                >
+                  <Switch
+                    label="滚轮提示音"
+                    checked={settings.wheelFeedback}
+                    onChange={(wheelFeedback) => save({ wheelFeedback })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="显示系统音量浮层"
+                  help="滚动时显示 Windows 自带的音量浮层（与按键盘音量键时相同）。与音量键一样，向上滚动会取消静音"
+                  isDefault={isDefault("wheelOsd")}
+                  onReset={() => reset("wheelOsd")}
+                >
+                  <Switch
+                    label="显示系统音量浮层"
+                    checked={settings.wheelOsd}
+                    onChange={(wheelOsd) => save({ wheelOsd })}
+                  />
+                </SettingRow>
+              </Section>
+
               <Section title="其他">
                 <SettingRow
                   title="音量提示音"
-                  help="调节系统音量后播放提示音，声音大小即当前音量"
+                  help="在窗口中调节系统音量后播放提示音，声音大小即当前音量"
                   isDefault={isDefault("volumeFeedback")}
                   onReset={() => reset("volumeFeedback")}
                 >

@@ -1,7 +1,9 @@
-//! 系统托盘：左键显示 / 隐藏窗口，右键菜单打开或退出，中键切换静音，滚轮调节系统音量。
+//! 系统托盘：左键显示 / 隐藏窗口，右键菜单打开或退出，中键切换静音，滚轮调节系统音量
+//! （可设置为在整个任务栏上响应滚轮）。
 //! 图标随系统音量和静音状态变化；样式和颜色可在设置中选择，颜色默认跟随任务栏深浅色。
 
 mod glyph;
+mod osd;
 mod theme;
 mod wheel;
 
@@ -84,7 +86,17 @@ pub fn create(app: &App) -> tauri::Result<()> {
         builder = builder.icon(icon.clone());
     }
     builder.build(app)?;
+    wheel::set_taskbar(
+        app.handle(),
+        app.state::<Config>().read(|s| s.taskbar_wheel),
+    );
     Ok(())
+}
+
+/// 设置中的“任务栏滚轮”变化后调用。可在任意线程调用，注册 / 注销在主线程上进行。
+pub fn set_taskbar_wheel(app: &AppHandle, enabled: bool) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || wheel::set_taskbar(&handle, enabled));
 }
 
 /// 托盘图标的位置（物理像素），取不到时为 `None`。
