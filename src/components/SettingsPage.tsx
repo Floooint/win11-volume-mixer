@@ -179,21 +179,16 @@ function AutostartSetting() {
   );
 }
 
-/** 已置顶或已隐藏的应用列表，每项右侧一个取消按钮。列表为空时显示提示。 */
+/** 已置顶或已隐藏的应用列表，每项右侧一个取消按钮。 */
 function SavedAppList({
   apps,
-  empty,
   actionLabel,
   onAction,
 }: {
   apps: SavedApp[];
-  empty: string;
   actionLabel: string;
   onAction: (appId: string) => void;
 }) {
-  if (apps.length === 0) {
-    return <p className="text-xs text-muted-foreground">{empty}</p>;
-  }
   return (
     <ul className="flex flex-col">
       {apps.map((app) => (
@@ -359,32 +354,37 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </SettingRow>
               </Section>
 
-              <Section title="应用">
-                <SettingRow
-                  title="置顶的应用"
-                  help="在主界面右键应用选择“置顶”。置顶的应用排在最前，可拖动左侧手柄调整顺序"
-                  below={
-                    <SavedAppList
-                      apps={settings.pinnedApps}
-                      empty="还没有置顶的应用"
-                      actionLabel="取消置顶"
-                      onAction={(appId) => void unpinApp(appId)}
+              {/* 只显示有内容的一项；都没有时整张卡片不显示（置顶和隐藏在主界面右键菜单中操作）。 */}
+              {(settings.pinnedApps.length > 0 || settings.hiddenApps.length > 0) && (
+                <Section title="应用">
+                  {settings.pinnedApps.length > 0 && (
+                    <SettingRow
+                      title="置顶的应用"
+                      help="在主界面右键应用选择“置顶”。置顶的应用排在最前，可拖动左侧手柄调整顺序"
+                      below={
+                        <SavedAppList
+                          apps={settings.pinnedApps}
+                          actionLabel="取消置顶"
+                          onAction={(appId) => void unpinApp(appId)}
+                        />
+                      }
                     />
-                  }
-                />
-                <SettingRow
-                  title="隐藏的应用"
-                  help="在主界面右键应用选择“隐藏”。隐藏的应用不在列表中显示，音量不受影响"
-                  below={
-                    <SavedAppList
-                      apps={settings.hiddenApps}
-                      empty="没有隐藏的应用"
-                      actionLabel="取消隐藏"
-                      onAction={(appId) => void unhideApp(appId)}
+                  )}
+                  {settings.hiddenApps.length > 0 && (
+                    <SettingRow
+                      title="隐藏的应用"
+                      help="在主界面右键应用选择“隐藏”。隐藏的应用不在列表中显示，音量不受影响"
+                      below={
+                        <SavedAppList
+                          apps={settings.hiddenApps}
+                          actionLabel="取消隐藏"
+                          onAction={(appId) => void unhideApp(appId)}
+                        />
+                      }
                     />
-                  }
-                />
-              </Section>
+                  )}
+                </Section>
+              )}
 
               <Section title="其他">
                 <SettingRow
