@@ -2,8 +2,8 @@
 //!
 //! 系统没有公开显示它的接口。做法与 Windhawk 的 taskbar-volume-control 相同：向任务栏中的
 //! `MSTaskSwWClass` 窗口投递 `SHELLHOOK` 消息（`HSHELL_APPCOMMAND` + 音量加 / 减），
-//! 资源管理器按音量键处理：音量变化 2% 并显示浮层。因此每格滚轮中最后的 2% 交给系统调节，
-//! 其余部分由本程序直接调节（见 `wheel.rs`）。与音量键一样，“音量加”会取消静音。
+//! 资源管理器按音量键处理：音量变化 2% 并显示浮层。因此每次滚动中的 2% 交给系统调节，
+//! 其余部分（步长为 1% 时为反方向的 1%）由本程序先行直接调节（见 `wheel.rs`）。与音量键一样，“音量加”会取消静音。
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{

@@ -182,15 +182,13 @@ impl Listener {
             .app
             .state::<Config>()
             .read(|s| (s.wheel_step, s.wheel_feedback, s.wheel_osd));
-        let (mut direct, system) = split(notches, step, show_osd);
-        // 最后 2% 交给系统调节并显示浮层；找不到任务栏窗口时改为直接调节。
-        if system != 0 && !osd::adjust(system > 0) {
-            direct += system * osd::SYSTEM_STEP as i32;
-        }
-        if direct != 0 {
+        let (direct, system) = split(notches, step, show_osd);
+        if system == 0 {
             self.app
                 .state::<AudioService>()
                 .post(|reply| Command::AdjustMasterVolume(direct as f32 / 100.0, reply));
+        } else {
+            adjust_with_osd(self.app.clone(), direct, system);
         }
         if feedback {
             schedule_feedback(self.app.clone());
@@ -308,9 +306,28 @@ fn contains(rect: &Rect, pt: POINT) -> bool {
     x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
 }
 
+/// 先直接调节 `direct` 个百分点，完成后再让系统调节 `system`（±1）次 2% 并显示浮层。
+/// 必须等直接调节完成：步长为 1% 时两部分方向相反（-1% 再 +2%），若系统先调，
+/// 在 0% 或 100% 处会被截断，结果出错。找不到任务栏窗口时这 2% 也直接调节。
+fn adjust_with_osd(app: AppHandle, direct: i32, system: i32) {
+    tauri::async_runtime::spawn(async move {
+        let audio = app.state::<AudioService>();
+        if direct != 0 {
+            let _ = audio
+                .request(|reply| Command::AdjustMasterVolume(direct as f32 / 100.0, reply))
+                .await;
+        }
+        if !osd::adjust(system > 0) {
+            let fallback = (system * osd::SYSTEM_STEP as i32) as f32 / 100.0;
+            audio.post(|reply| Command::AdjustMasterVolume(fallback, reply));
+        }
+    });
+}
+
 /// 把 `notches` 格滚轮（向上为正）、每格 `step`% 的调节分成两部分：
 /// 本程序直接调节的百分点，以及交给系统调节（每次 2%，同时显示音量浮层）的次数。
 /// 与 Windhawk 的做法一致，每次滚动只让系统调节一次，其余直接调节，避免浮层反复刷新。
+/// 总量不足 2% 时（步长 1%）直接调节部分为反方向，如 +1% = -1% + 系统 +2%。
 fn split(notches: i32, step: u32, show_osd: bool) -> (i32, i32) {
     let total = notches * step as i32;
     if !show_osd || total == 0 {
@@ -375,6 +392,9 @@ mod tests {
             "不显示浮层时任意步长都直接调节"
         );
         assert_eq!(split(1, 2, true), (0, 1), "2% 全部交给系统");
+        assert_eq!(split(1, 1, true), (-1, 1), "1% = -1% + 系统 +2%");
+        assert_eq!(split(-1, 1, true), (1, -1));
+        assert_eq!(split(3, 1, true), (1, 1));
         assert_eq!(split(1, 6, true), (4, 1));
         assert_eq!(split(-2, 4, true), (-6, -1));
         assert_eq!(split(0, 4, true), (0, 0));

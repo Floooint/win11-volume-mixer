@@ -229,8 +229,8 @@ export type Settings_Deserialize = {
 	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。 */
 	appsReversed?: boolean,
 	/**
-	 *  界面使用 GPU 渲染。关闭时窗口显示期间少占约 70 MB 内存（实测见 docs/architecture.md），
-	 *  界面简单，软件渲染足够流畅。重启程序后生效。
+	 *  界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
+	 *  docs/architecture.md），界面简单，软件渲染也足够流畅。重启程序后生效。
 	 */
 	hardwareAcceleration?: boolean,
 	theme?: ThemeMode,
@@ -249,7 +249,7 @@ export type Settings_Deserialize = {
 	trayStyle?: TrayStyle,
 	/**  在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。 */
 	taskbarWheel?: boolean,
-	/**  托盘 / 任务栏滚轮每格调节的百分点（2–10 的偶数）。 */
+	/**  托盘 / 任务栏滚轮每格调节的百分点（1–10）。 */
 	wheelStep?: number,
 	/**  托盘 / 任务栏滚轮停止后播放提示音。 */
 	wheelFeedback?: boolean,
@@ -278,8 +278,8 @@ export type Settings_Serialize = {
 	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。 */
 	appsReversed: boolean,
 	/**
-	 *  界面使用 GPU 渲染。关闭时窗口显示期间少占约 70 MB 内存（实测见 docs/architecture.md），
-	 *  界面简单，软件渲染足够流畅。重启程序后生效。
+	 *  界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
+	 *  docs/architecture.md），界面简单，软件渲染也足够流畅。重启程序后生效。
 	 */
 	hardwareAcceleration: boolean,
 	theme: ThemeMode,
@@ -298,7 +298,7 @@ export type Settings_Serialize = {
 	trayStyle: TrayStyle,
 	/**  在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。 */
 	taskbarWheel: boolean,
-	/**  托盘 / 任务栏滚轮每格调节的百分点（2–10 的偶数）。 */
+	/**  托盘 / 任务栏滚轮每格调节的百分点（1–10）。 */
 	wheelStep: number,
 	/**  托盘 / 任务栏滚轮停止后播放提示音。 */
 	wheelFeedback: boolean,

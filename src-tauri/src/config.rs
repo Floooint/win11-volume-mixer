@@ -21,8 +21,8 @@ const PATH_ENV: &str = "VOLUME_MIXER_SETTINGS";
 pub const SMART_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
 const DEFAULT_SMART_SECONDS: u32 = 300;
 
-/// 托盘 / 任务栏滚轮每格调节的百分点。必须是偶数：显示系统音量浮层时，最后 2% 由系统调节。
-pub const WHEEL_STEP_RANGE: std::ops::RangeInclusive<u32> = 2..=10;
+/// 托盘 / 任务栏滚轮每格调节的百分点。
+pub const WHEEL_STEP_RANGE: std::ops::RangeInclusive<u32> = 1..=10;
 const DEFAULT_WHEEL_STEP: u32 = 2;
 
 /// 窗口宽度范围（逻辑像素），须与 `tauri.conf.json` 的 `minWidth` / `maxWidth` 一致。
@@ -154,8 +154,8 @@ pub struct Settings {
     pub master_at_bottom: bool,
     /// 应用列表倒序：活跃应用排在底部，更靠近任务栏。
     pub apps_reversed: bool,
-    /// 界面使用 GPU 渲染。关闭时窗口显示期间少占约 70 MB 内存（实测见 docs/architecture.md），
-    /// 界面简单，软件渲染足够流畅。重启程序后生效。
+    /// 界面使用 GPU 渲染，默认开启。关闭时窗口显示期间少占约 70 MB 内存（实测见
+    /// docs/architecture.md），界面简单，软件渲染也足够流畅。重启程序后生效。
     pub hardware_acceleration: bool,
     pub theme: ThemeMode,
     /// 强调色 `#RRGGBB`；`None` 表示跟随 Windows 强调色。
@@ -173,7 +173,7 @@ pub struct Settings {
     pub tray_style: TrayStyle,
     /// 在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。
     pub taskbar_wheel: bool,
-    /// 托盘 / 任务栏滚轮每格调节的百分点（2–10 的偶数）。
+    /// 托盘 / 任务栏滚轮每格调节的百分点（1–10）。
     pub wheel_step: u32,
     /// 托盘 / 任务栏滚轮停止后播放提示音。
     pub wheel_feedback: bool,
@@ -196,7 +196,7 @@ impl Default for Settings {
             window_width: DEFAULT_WIDTH,
             master_at_bottom: false,
             apps_reversed: false,
-            hardware_acceleration: false,
+            hardware_acceleration: true,
             theme: ThemeMode::System,
             accent: None,
             pinned_apps: Vec::new(),
@@ -205,10 +205,10 @@ impl Default for Settings {
             app_aliases: Vec::new(),
             scenes: Vec::new(),
             tray_style: TrayStyle::default(),
-            taskbar_wheel: false,
+            taskbar_wheel: true,
             wheel_step: DEFAULT_WHEEL_STEP,
             wheel_feedback: true,
-            wheel_osd: false,
+            wheel_osd: true,
             tray_color: None,
             autostart_prompt: false,
         }
@@ -234,9 +234,9 @@ impl Settings {
         self.window_width = self
             .window_width
             .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
-        // 奇数向下取偶数，再限制范围。
-        self.wheel_step =
-            (self.wheel_step / 2 * 2).clamp(*WHEEL_STEP_RANGE.start(), *WHEEL_STEP_RANGE.end());
+        self.wheel_step = self
+            .wheel_step
+            .clamp(*WHEEL_STEP_RANGE.start(), *WHEEL_STEP_RANGE.end());
         self
     }
 }
@@ -465,11 +465,10 @@ mod tests {
         assert_eq!(settings.window_width, 340);
         assert!(!settings.master_at_bottom, "默认系统音量在上方");
         assert!(!settings.apps_reversed, "默认活跃应用在上方");
-        assert!(
-            !settings.hardware_acceleration,
-            "默认关闭硬件加速以节省内存"
-        );
-        assert!(!settings.taskbar_wheel, "默认只在托盘图标上响应滚轮");
+        assert!(settings.hardware_acceleration, "默认开启硬件加速");
+        assert!(settings.taskbar_wheel, "默认在整个任务栏上响应滚轮");
+        assert_eq!(settings.wheel_step, 2);
+        assert!(settings.wheel_feedback && settings.wheel_osd);
     }
 
     #[test]
@@ -676,13 +675,13 @@ mod tests {
     }
 
     #[test]
-    fn 滚轮步长为2到10的偶数() {
+    fn 滚轮步长被限制在1到10之间() {
         let settings = |wheel_step| Settings {
             wheel_step,
             ..Settings::default()
         };
-        assert_eq!(settings(0).normalized().wheel_step, 2);
-        assert_eq!(settings(5).normalized().wheel_step, 4);
+        assert_eq!(settings(0).normalized().wheel_step, 1);
+        assert_eq!(settings(5).normalized().wheel_step, 5);
         assert_eq!(settings(8).normalized().wheel_step, 8);
         assert_eq!(settings(99).normalized().wheel_step, 10);
     }

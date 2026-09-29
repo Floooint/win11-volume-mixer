@@ -203,9 +203,9 @@ function TrayColorPicker({
   );
 }
 
-/** 与后端 `config::WHEEL_STEP_RANGE` 保持一致：2–10 的偶数。 */
-type WheelStep = "2" | "4" | "6" | "8" | "10";
-const WHEEL_STEPS: SelectOption<WheelStep>[] = (["2", "4", "6", "8", "10"] as const).map(
+/** 在后端 `config::WHEEL_STEP_RANGE`（1–10）之内。 */
+type WheelStep = "1" | "2" | "4" | "6" | "8" | "10";
+const WHEEL_STEPS: SelectOption<WheelStep>[] = (["1", "2", "4", "6", "8", "10"] as const).map(
   (value) => ({ value, label: `${value}%` }),
 );
 
@@ -668,7 +668,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </SettingRow>
                 <SettingRow
                   title="硬件加速"
-                  help="使用 GPU 渲染界面。关闭时窗口显示期间少占约 70 MB 内存，界面效果不变。重启程序后生效"
+                  help="使用 GPU 渲染界面，默认开启。关闭时窗口显示期间少占约 70 MB 内存，界面效果不变。重启程序后生效"
                   isDefault={isDefault("hardwareAcceleration")}
                   onReset={() => {
                     setRestartNeeded(true);
