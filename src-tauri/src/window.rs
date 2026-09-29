@@ -257,6 +257,21 @@ fn browser_args(hardware_acceleration: bool) -> String {
     args
 }
 
+/// 本次运行使用的 WebView2 启动参数。所有窗口必须相同，才能共用同一个浏览器进程；
+/// 硬件加速设置在首次创建窗口时读取，修改后重启程序才生效。
+pub(crate) fn browser_args_for<R: Runtime>(app: &AppHandle<R>) -> String {
+    let hardware_acceleration = *app
+        .state::<WindowState>()
+        .hardware_acceleration
+        .get_or_init(|| app.state::<Config>().get().hardware_acceleration);
+    browser_args(hardware_acceleration)
+}
+
+/// 设置中的深浅色对应的窗口主题，新建窗口时使用。
+pub(crate) fn theme_for<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Theme> {
+    window_theme(app.state::<Config>().get().theme)
+}
+
 /// 按 `tauri.conf.json` 中的配置创建主窗口（初始隐藏）。
 fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
     let config = app
@@ -266,14 +281,9 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .iter()
         .find(|w| w.label == MAIN)
         .expect("tauri.conf.json 中缺少主窗口配置");
-    let hardware_acceleration = *app
-        .state::<WindowState>()
-        .hardware_acceleration
-        .get_or_init(|| app.state::<Config>().get().hardware_acceleration);
-    let theme = window_theme(app.state::<Config>().get().theme);
     let window = WebviewWindowBuilder::from_config(app, config)?
-        .additional_browser_args(&browser_args(hardware_acceleration))
-        .theme(theme)
+        .additional_browser_args(&browser_args_for(app))
+        .theme(theme_for(app))
         .build()?;
     disable_system_transitions(&window);
     // 窗口被释放后重建时，恢复当前的固定方式（配置中默认置顶）。
@@ -332,7 +342,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, show: bool, tray: Option<Rect>) -> t
     Ok(())
 }
 
-/// 在托盘图标附近显示窗口；`tray` 为 `None` 时（如重复启动）使用上次的托盘位置。
+/// 在托盘图标附近显示窗口；`tray` 为 `None` 时（取不到托盘位置）使用上次的托盘位置。
 pub fn show<R: Runtime>(app: &AppHandle<R>, tray: Option<Rect>) {
     let requested_at = Instant::now();
     cancel_release_timer(app);
@@ -465,6 +475,8 @@ fn hide<R: Runtime>(window: &tauri::Window<R>) {
     if state.hiding.swap(true, Ordering::SeqCst) {
         return;
     }
+    // 详情浮窗随主窗口一起消失，并释放它的内存。
+    crate::details::destroy(window);
     // 也会取消进行中的滑入动画和高度动画。
     let generation = state.animation.next();
     state.entering.store(false, Ordering::SeqCst);

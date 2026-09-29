@@ -55,7 +55,7 @@ pub fn create(app: &App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            MENU_OPEN => window::show(app, None),
+            MENU_OPEN => window::show(app, rect(app)),
             MENU_QUIT => app.exit(0),
             _ => {}
         })

@@ -189,6 +189,38 @@ pub fn preview_window_width(window: tauri::WebviewWindow, width: u32) {
     crate::window::preview_width(&window, Some(width));
 }
 
+/// 鼠标在应用上停留后显示详情浮窗。`anchor_top` 为应用行上边缘相对窗口内容区的位置（逻辑像素）。
+/// 必须是异步命令：Windows 上在同步命令（主线程）中创建窗口，WebView 无法完成创建。
+#[tauri::command]
+#[specta::specta]
+pub async fn show_app_details(
+    app: tauri::AppHandle,
+    details: crate::details::AppDetails,
+    anchor_top: f64,
+) {
+    crate::details::show(&app, details, anchor_top);
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hide_app_details(app: tauri::AppHandle) {
+    crate::details::hide(&app);
+}
+
+/// 详情浮窗首次加载时读取要显示的内容；之后的更新通过 `details://show` 事件推送。
+#[tauri::command]
+#[specta::specta]
+pub fn get_app_details(app: tauri::AppHandle) -> Option<crate::details::AppDetails> {
+    crate::details::current(&app)
+}
+
+/// 详情浮窗渲染完成，报告内容高度（逻辑像素），后端据此定位并显示。
+#[tauri::command]
+#[specta::specta]
+pub fn details_ready(window: tauri::WebviewWindow, content_height: f64) {
+    crate::details::ready(&window, content_height);
+}
+
 /// Windows 要求标量音量在 0–1 之间，超出范围会返回 E_INVALIDARG。
 fn clamp(volume: f32) -> f32 {
     if volume.is_nan() {

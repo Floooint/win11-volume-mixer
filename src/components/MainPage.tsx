@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   BookmarkPlus,
   ChevronRight,
@@ -32,61 +31,18 @@ import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Settings as SettingsIcon } from "@/components/animate-ui/icons/settings";
 import { Trash2 } from "@/components/animate-ui/icons/trash-2";
 import { VolumeOff } from "@/components/animate-ui/icons/volume-off";
+import { AppAvatar } from "@/components/AppAvatar";
 import { IconButton } from "@/components/IconButton";
-import { MainPageSkeleton, Skeleton } from "@/components/Skeleton";
+import { MainPageSkeleton } from "@/components/Skeleton";
 import { VolumeRow } from "@/components/VolumeRow";
 import { type DragState, type DropTarget, sameTarget, useAppDrag } from "@/hooks/use-app-drag";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
 import { type MenuItem, menuData, onMenuAction } from "@/lib/context-menu";
+import { cancelHoverDetails, startHoverDetails } from "@/lib/hover-details";
 import { cn } from "@/lib/utils";
 import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
 import { DEBUG_APP_PREFIX, useDebugStore } from "@/stores/debug";
-
-/**
- * 应用图标，由后端经 `appicon` 协议提供。加载期间显示骨架占位，避免首字母一闪而过；
- * 没有图标来源或加载失败时显示首字母占位，正在发声时换成强调色。
- * 调用方以 `app.icon` 作为 key，来源变化时重置加载状态。
- */
-function AppAvatar({ app }: { app: AppAudio }) {
-  const [status, setStatus] = useState<"loading" | "loaded" | "error">(
-    app.icon ? "loading" : "error",
-  );
-
-  if (app.icon && status !== "error") {
-    return (
-      <div aria-hidden className="relative flex size-8 shrink-0 items-center justify-center">
-        {status === "loading" && <Skeleton className="absolute size-7 rounded-lg" />}
-        <img
-          src={convertFileSrc(app.icon, "appicon")}
-          alt=""
-          draggable={false}
-          onLoad={() => setStatus("loaded")}
-          onError={() => setStatus("error")}
-          className={cn(
-            "relative size-7 object-contain transition-opacity",
-            status === "loading" && "opacity-0",
-          )}
-        />
-      </div>
-    );
-  }
-
-  const letter = app.appId === "system" ? "系" : (app.name.trim()[0] ?? "?").toUpperCase();
-  return (
-    <div
-      aria-hidden
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-colors",
-        app.active
-          ? "bg-primary/15 text-primary ring-1 ring-primary/30"
-          : "bg-secondary text-secondary-foreground",
-      )}
-    >
-      {letter}
-    </div>
-  );
-}
 
 const PIN_MODES: Record<PinMode, { next: PinMode; label: string }> = {
   normal: { next: "pinned", label: "固定窗口：当前失焦自动隐藏，点击改为定住" },
@@ -247,6 +203,7 @@ function AppItem({
   groups,
   scrollAreaRef,
   dragging,
+  hoverDisabled,
   onDragStart,
   onVolumeChange,
   ref,
@@ -262,6 +219,8 @@ function AppItem({
   groups: AppGroup[];
   scrollAreaRef: RefObject<HTMLElement | null>;
   dragging: boolean;
+  /** 拖动或重命名期间不显示悬停详情。 */
+  hoverDisabled: boolean;
   onDragStart: (e: React.PointerEvent) => void;
   /** 分组内的应用单独调节时，需要同时记下它在组音量 100% 时的音量。 */
   onVolumeChange?: (volume: number) => void;
@@ -295,6 +254,11 @@ function AppItem({
       animate={{ opacity: dragging ? 0.4 : 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.97 }}
       transition={LIST_TRANSITION}
+      // 停留 3 秒显示详情；分组内的应用行嵌在分组行中，进入 / 离开各自计算。
+      onPointerEnter={(e) => !hoverDisabled && startHoverDetails(e, { app, alias: alias ?? null })}
+      onPointerLeave={cancelHoverDetails}
+      onPointerDown={cancelHoverDetails}
+      onWheel={cancelHoverDetails}
       data-menu={menuData([
         { label: "复制应用名", value: name },
         alias && { label: "复制原名", value: app.name },
@@ -526,6 +490,7 @@ function GroupItem({
                 groups={groups}
                 scrollAreaRef={scrollAreaRef}
                 dragging={drag?.appId === app.appId}
+                hoverDisabled={!!drag || renaming !== null}
                 onDragStart={(e) => onDragStart(app, e)}
                 onVolumeChange={(v) => void setMemberVolume(group.id, app.appId, v)}
               />
@@ -917,6 +882,9 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     ],
   );
 
+  // 切换到设置页时收起详情浮窗。
+  useEffect(() => cancelHoverDetails, []);
+
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1058,6 +1026,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                       groups={groups}
                       scrollAreaRef={scrollRef}
                       dragging={drag?.appId === entry.app.appId}
+                      hoverDisabled={!!drag || renaming !== null}
                       onDragStart={(e) =>
                         startDrag(
                           entry.app.appId,

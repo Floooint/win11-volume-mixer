@@ -44,6 +44,20 @@ export const commands = {
 	dark: string,
 } | null>("get_accent_colors"),
 	setAutostart: (enabled: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_autostart", { enabled })),
+	/**
+	 *  鼠标在应用上停留后显示详情浮窗。`anchor_top` 为应用行上边缘相对窗口内容区的位置（逻辑像素）。
+	 *  必须是异步命令：Windows 上在同步命令（主线程）中创建窗口，WebView 无法完成创建。
+	 */
+	showAppDetails: (details: AppDetails, anchorTop: number) => __TAURI_INVOKE<void>("show_app_details", { details, anchorTop }),
+	hideAppDetails: () => __TAURI_INVOKE<void>("hide_app_details"),
+	/**  详情浮窗首次加载时读取要显示的内容；之后的更新通过 `details://show` 事件推送。 */
+	getAppDetails: () => __TAURI_INVOKE<{
+	app: AppAudio,
+	/**  用户起的名称。 */
+	alias: string | null,
+} | null>("get_app_details"),
+	/**  详情浮窗渲染完成，报告内容高度（逻辑像素），后端据此定位并显示。 */
+	detailsReady: (contentHeight: number) => __TAURI_INVOKE<void>("details_ready", { contentHeight }),
 };
 
 /** Events */
@@ -52,6 +66,7 @@ export const events = {
 	audioAppUpsert: makeEvent<AppUpsertEvent>("audio://app-upsert"),
 	audioMaster: makeEvent<MasterChangedEvent>("audio://master"),
 	audioSnapshot: makeEvent<AudioSnapshotEvent>("audio://snapshot"),
+	detailsShow: makeEvent<AppDetailsEvent>("details://show"),
 	themeAccent: makeEvent<AccentColors>("theme://accent"),
 };
 
@@ -87,6 +102,16 @@ export type AppAudio = {
 	active: boolean,
 	sessionCount: number,
 };
+
+/**  浮窗显示的内容。 */
+export type AppDetails = {
+	app: AppAudio,
+	/**  用户起的名称。 */
+	alias: string | null,
+};
+
+/**  要显示的内容变化时推送给浮窗。 */
+export type AppDetailsEvent = AppDetails;
 
 export type AppError = {
 	code: ErrorCode,

@@ -6,6 +6,7 @@ mod clipboard;
 mod commands;
 mod config;
 mod context_menu;
+mod details;
 mod error;
 mod events;
 mod feedback;
@@ -46,6 +47,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_pin_mode,
             commands::get_accent_colors,
             commands::set_autostart,
+            commands::show_app_details,
+            commands::hide_app_details,
+            commands::get_app_details,
+            commands::details_ready,
         ])
         .events(collect_events![
             events::AudioSnapshotEvent,
@@ -53,6 +58,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::AppUpsertEvent,
             events::AppRemoveEvent,
             accent::AccentColors,
+            details::AppDetailsEvent,
         ])
 }
 
@@ -94,10 +100,11 @@ pub fn run() {
     let app = tauri::Builder::default()
         // 必须第一个注册：重复启动时唤起已有窗口，新进程随即退出。
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            window::show(app, None);
+            window::show(app, tray::rect(app));
         }))
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .manage(window::WindowState::default())
+        .manage(details::DetailsState::default())
         .manage(accent::AccentWatcher::default())
         .manage(feedback::Feedback::default())
         .manage(icon::IconService::start())
