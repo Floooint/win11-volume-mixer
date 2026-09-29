@@ -1,19 +1,19 @@
 # 开发环境与规范
 
-本项目使用 Tauri 2 + React + TypeScript + Rust，不需要 Python 虚拟环境（`.venv`）。
+本项目使用 Tauri 2 + React + TypeScript + Rust
 
 动手前先阅读：[项目说明](docs/readme.md)、[架构设计](docs/architecture.md)、[开发路线](docs/roadmap.md)。
 
 ## 开发环境
 
-| 工具 | 要求 | 本机版本（2026-09-28） |
-| --- | --- | --- |
-| Node.js | 24（见 `.node-version`） | v24.16.0 |
-| pnpm | 12.x | 12.6.0 |
-| Rust 工具链 | stable，`x86_64-pc-windows-msvc` | 1.98.1 |
-| Visual Studio Build Tools 2022 | `VCTools` 工作负载（含 Windows SDK） | 17.14.41 |
-| WebView2 Runtime | Windows 11 自带 | 自带 |
-| Git | 任意较新版本 | 2.45.1 |
+| 工具                           | 要求                                   | 本机版本（2026-09-28） |
+| ------------------------------ | -------------------------------------- | ---------------------- |
+| Node.js                        | 24（见`.node-version`）              | v24.16.0               |
+| pnpm                           | 12.x                                   | 12.6.0                 |
+| Rust 工具链                    | stable，`x86_64-pc-windows-msvc`     | 1.98.1                 |
+| Visual Studio Build Tools 2022 | `VCTools` 工作负载（含 Windows SDK） | 17.14.41               |
+| WebView2 Runtime               | Windows 11 自带                        | 自带                   |
+| Git                            | 任意较新版本                           | 2.45.1                 |
 
 安装方式（本机实际使用）：
 

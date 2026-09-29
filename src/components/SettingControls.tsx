@@ -5,6 +5,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { RotateCcw } from "@/components/animate-ui/icons/rotate-ccw";
 import { IconButton } from "@/components/IconButton";
+import { ignoreNonPrimary } from "@/components/VolumeSlider";
 import { cn } from "@/lib/utils";
 
 /** 标题右上角的问号，悬停或聚焦时显示说明。需要外层有 `TooltipPrimitive.Provider`（见 App）。 */
@@ -263,6 +264,7 @@ export function Slider({
       step={step}
       value={[value]}
       aria-label={label}
+      onPointerDown={ignoreNonPrimary}
       onValueChange={([v]) => onChange(v)}
       onValueCommit={([v]) => onCommit(v)}
     >

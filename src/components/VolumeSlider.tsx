@@ -1,5 +1,5 @@
 import * as SliderPrimitive from "@radix-ui/react-slider";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /** 拖动时向后端发送的最小间隔，见 docs/architecture.md“Commands”。 */
@@ -10,6 +10,17 @@ const WHEEL_STEP = 0.02;
 
 /** 滚轮停止多久后视为一次调节结束。 */
 const WHEEL_END_MS = 250;
+
+/**
+ * 只有主键（左键、触摸、笔）能拖动滑块，避免想用右键打开菜单时误调数值。
+ * 在滑块的 `onPointerDown` 中调用：非主键时 `preventDefault()`，
+ * Radix 据此跳过自身的拖动处理；右键菜单不受影响。返回是否已忽略。
+ */
+export function ignoreNonPrimary(e: PointerEvent): boolean {
+  if (e.button === 0) return false;
+  e.preventDefault();
+  return true;
+}
 
 type VolumeSliderProps = {
   /** 当前音量，0–1。 */
@@ -131,7 +142,8 @@ export function VolumeSlider({
       step={1}
       value={[Math.round(local * 100)]}
       aria-label={label}
-      onPointerDown={() => {
+      onPointerDown={(e) => {
+        if (ignoreNonPrimary(e)) return;
         adjusting.current = true;
       }}
       onValueChange={([v]) => update(v / 100)}
