@@ -86,6 +86,12 @@ pub fn create(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// 托盘图标的位置（物理像素），取不到时为 `None`。
+pub fn rect(app: &AppHandle) -> Option<Rect> {
+    let tray = app.tray_by_id(TRAY_ID)?;
+    tray.rect().ok().flatten().map(physical_rect)
+}
+
 /// 记录新的系统音量状态并更新图标。可在任意线程调用：托盘操作转到主线程执行，
 /// 不在调用线程上等待主线程（音频线程退出时主线程正等待它，等待会造成死锁）。
 pub fn show_status(app: &AppHandle, status: Option<MasterStatus>) {

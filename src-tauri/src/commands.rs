@@ -171,6 +171,9 @@ pub fn set_settings(
     config: State<'_, Config>,
     settings: Settings,
 ) -> AppResult<()> {
+    if !settings.autostart_prompt {
+        crate::window::release_hold(&window);
+    }
     let result = config.set(settings).map(|_| ());
     // 结束宽度预览，按设置中的值调整；保存失败时即恢复为原来的宽度。
     crate::window::preview_width(&window, None);

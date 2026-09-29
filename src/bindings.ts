@@ -62,6 +62,14 @@ export type AccentColors = {
 	dark: string,
 };
 
+/**  重命名的应用。`name` 为原来的应用名，应用没在运行时设置页也能显示。 */
+export type AppAlias = {
+	appId: string,
+	name: string,
+	/**  用户起的名称，界面中优先显示。 */
+	alias: string,
+};
+
 export type AppAudio = {
 	appId: string,
 	name: string,
@@ -192,6 +200,10 @@ export type Settings_Deserialize = {
 	hiddenApps?: SavedApp[],
 	/**  应用分组，按显示顺序排列。一个应用只属于一个分组。 */
 	groups?: AppGroup[],
+	/**  重命名的应用。 */
+	appAliases?: AppAlias[],
+	/**  还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。 */
+	autostartPrompt?: boolean,
 };
 
 export type Settings_Serialize = {
@@ -224,6 +236,10 @@ export type Settings_Serialize = {
 	hiddenApps: SavedApp[],
 	/**  应用分组，按显示顺序排列。一个应用只属于一个分组。 */
 	groups: AppGroup[],
+	/**  重命名的应用。 */
+	appAliases: AppAlias[],
+	/**  还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。 */
+	autostartPrompt: boolean,
 };
 
 /**  界面深浅色。 */

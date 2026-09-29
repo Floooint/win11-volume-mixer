@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  type AppAlias,
   type AppGroup,
   commands,
   type GroupMember,
@@ -36,6 +37,8 @@ type SettingsState = {
   /** 单独调节组内某个应用：`volume` 为它的新实际音量，换算后记下。 */
   setMemberVolume: (groupId: string, appId: string, volume: number) => Promise<void>;
   deleteGroup: (groupId: string) => Promise<void>;
+  /** 重命名应用；`alias` 为空时恢复原名。 */
+  renameApp: (app: SavedApp, alias: string | null) => Promise<void>;
 };
 
 const without = <T extends { appId: string }>(apps: T[], appId: string) =>
@@ -173,5 +176,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const s = get().settings;
     if (!s) return;
     await get().save({ groups: s.groups.filter((g) => g.id !== groupId) });
+  },
+  renameApp: async (app, alias) => {
+    const s = get().settings;
+    if (!s) return;
+    const rest = without(s.appAliases, app.appId);
+    const trimmed = alias?.trim();
+    // 与原名相同视为恢复原名。
+    const entry: AppAlias | null =
+      trimmed && trimmed !== app.name ? { appId: app.appId, name: app.name, alias: trimmed } : null;
+    await get().save({ appAliases: entry ? [...rest, entry] : rest });
   },
 }));

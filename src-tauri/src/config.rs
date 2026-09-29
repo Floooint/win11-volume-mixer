@@ -1,7 +1,9 @@
-//! 用户设置：保存在应用配置目录下的 `settings.json`。
+//! 用户设置：保存在程序所在目录的 `settings.json`，便于备份和随程序一起移动。
+//! 程序目录不可写（如安装到 Program Files）时，改存到应用配置目录（`%APPDATA%\<identifier>`）。
+//! 旧版本的设置保存在应用配置目录，首次使用新位置时复制过来（不删除旧文件）。
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +14,8 @@ use crate::animation::FPS_RANGE;
 use crate::error::{AppError, AppResult, ErrorCode};
 
 const FILE_NAME: &str = "settings.json";
+/// 指定设置文件的完整路径，仅用于测试（如模拟首次运行），不影响正常使用。
+const PATH_ENV: &str = "VOLUME_MIXER_SETTINGS";
 
 /// “智能”模式释放界面前等待的秒数范围。
 pub const SMART_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
@@ -54,6 +58,19 @@ pub struct SavedApp {
     pub app_id: String,
     pub name: String,
 }
+
+/// 重命名的应用。`name` 为原来的应用名，应用没在运行时设置页也能显示。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AppAlias {
+    pub app_id: String,
+    pub name: String,
+    /// 用户起的名称，界面中优先显示。
+    pub alias: String,
+}
+
+/// 重命名的最大长度（字符）。
+pub const MAX_ALIAS_CHARS: usize = 40;
 
 /// 分组中的一个应用。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -110,6 +127,10 @@ pub struct Settings {
     pub hidden_apps: Vec<SavedApp>,
     /// 应用分组，按显示顺序排列。一个应用只属于一个分组。
     pub groups: Vec<AppGroup>,
+    /// 重命名的应用。
+    pub app_aliases: Vec<AppAlias>,
+    /// 还没询问过是否开机自启：首次运行时为 `true`，主界面据此弹出询问，回答后清除。
+    pub autostart_prompt: bool,
 }
 
 impl Default for Settings {
@@ -129,6 +150,8 @@ impl Default for Settings {
             pinned_apps: Vec::new(),
             hidden_apps: Vec::new(),
             groups: Vec::new(),
+            app_aliases: Vec::new(),
+            autostart_prompt: false,
         }
     }
 }
@@ -146,6 +169,7 @@ impl Settings {
         self.pinned_apps = saved_apps(self.pinned_apps);
         self.hidden_apps = saved_apps(self.hidden_apps);
         self.groups = normalized_groups(self.groups);
+        self.app_aliases = normalized_aliases(self.app_aliases);
         self.window_width = self
             .window_width
             .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
@@ -158,6 +182,21 @@ fn saved_apps(apps: Vec<SavedApp>) -> Vec<SavedApp> {
     let mut seen = std::collections::HashSet::new();
     apps.into_iter()
         .filter(|app| !app.app_id.starts_with("pid:") && seen.insert(app.app_id.clone()))
+        .collect()
+}
+
+/// 去重、去掉以 PID 标识的应用；名称去掉首尾空白并限制长度，为空的去掉。
+fn normalized_aliases(aliases: Vec<AppAlias>) -> Vec<AppAlias> {
+    let mut seen = std::collections::HashSet::new();
+    aliases
+        .into_iter()
+        .filter_map(|mut a| {
+            a.alias = a.alias.trim().chars().take(MAX_ALIAS_CHARS).collect();
+            let keep = !a.alias.is_empty()
+                && !a.app_id.starts_with("pid:")
+                && seen.insert(a.app_id.clone());
+            keep.then_some(a)
+        })
         .collect()
 }
 
@@ -209,13 +248,29 @@ pub struct Config {
 impl Config {
     /// 读取设置；文件不存在或损坏时使用默认值，不阻止程序启动。
     pub fn load<R: Runtime>(app: &AppHandle<R>) -> Self {
-        let path = app
+        // 用环境变量指定位置时（测试），不读取、也不迁移旧位置的设置。
+        let override_path = std::env::var_os(PATH_ENV).map(PathBuf::from);
+        let legacy = app
             .path()
             .app_config_dir()
             .ok()
-            .map(|dir| dir.join(FILE_NAME));
-        let first_run = path.as_ref().is_some_and(|p| !p.exists());
-        let mut settings: Settings = path
+            .map(|dir| dir.join(FILE_NAME))
+            .filter(|_| override_path.is_none());
+        let path = override_path.or_else(|| settings_path(legacy.as_deref()));
+        let first_run = path.as_ref().is_some_and(|p| !p.exists())
+            && legacy.as_ref().is_none_or(|p| !p.exists());
+        // 新位置还没有设置文件时，读取旧位置的，并复制到新位置。
+        let source = match (&path, &legacy) {
+            (Some(p), Some(old)) if !p.exists() && old.exists() => {
+                if let Err(e) = fs::copy(old, p) {
+                    eprintln!("[config] 无法把设置复制到 {}：{e}", p.display());
+                }
+                Some(old.clone())
+            }
+            _ => path.clone(),
+        };
+        eprintln!("[config] 设置文件：{:?}", path);
+        let mut settings: Settings = source
             .as_ref()
             .and_then(|p| fs::read_to_string(p).ok())
             .and_then(|text| match serde_json::from_str(&text) {
@@ -227,6 +282,10 @@ impl Config {
             })
             .unwrap_or_default();
         settings = settings.normalized();
+        // 升级前的设置文件没有这一项，按默认值（已询问过）处理，不再打扰老用户。
+        if first_run {
+            settings.autostart_prompt = true;
+        }
 
         // 仅用于对比测量，不写回文件。
         match std::env::var("VOLUME_MIXER_WINDOW").as_deref() {
@@ -264,6 +323,31 @@ impl Config {
         let mut current = self.settings.lock().map_err(|_| save_failed())?;
         Ok(std::mem::replace(&mut *current, settings))
     }
+}
+
+/// 设置文件的位置：程序所在目录（可写时），否则为旧位置（应用配置目录）。
+fn settings_path(legacy: Option<&Path>) -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    match exe_dir {
+        Some(dir) if dir.join(FILE_NAME).exists() || is_writable(&dir) => Some(dir.join(FILE_NAME)),
+        _ => legacy.map(Path::to_path_buf),
+    }
+}
+
+/// 能否在目录中创建文件：试着创建一个临时文件再删除。
+fn is_writable(dir: &Path) -> bool {
+    let probe = dir.join(".settings-write-test");
+    let created = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .is_ok();
+    if created {
+        let _ = fs::remove_file(&probe);
+    }
+    created
 }
 
 fn save_failed() -> AppError {
@@ -319,10 +403,12 @@ mod tests {
             pinned_apps: Vec::new(),
             hidden_apps: Vec::new(),
             groups: Vec::new(),
+            app_aliases: Vec::new(),
+            autostart_prompt: false,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[]}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"autostartPrompt":false}"##
         );
     }
 
@@ -403,6 +489,33 @@ mod tests {
         assert_eq!(settings.groups[0].volume, 1.0);
         assert_eq!(settings.groups[1].volume, 1.0, "无效的组音量按 100%");
         assert_eq!(settings.groups[0].apps[0].full_volume, 1.0);
+    }
+
+    #[test]
+    fn 重命名去掉空白和空名称并限制长度() {
+        let alias = |id: &str, alias: &str| AppAlias {
+            app_id: id.into(),
+            name: id.into(),
+            alias: alias.into(),
+        };
+        let settings = Settings {
+            app_aliases: vec![
+                alias("a", "  音乐  "),
+                alias("b", "   "),
+                alias("pid:1", "x"),
+                alias("a", "重复"),
+                alias("c", &"长".repeat(100)),
+            ],
+            ..Settings::default()
+        }
+        .normalized();
+        let aliases: Vec<_> = settings
+            .app_aliases
+            .iter()
+            .map(|a| (a.app_id.as_str(), a.alias.chars().count()))
+            .collect();
+        assert_eq!(aliases, [("a", 2), ("c", MAX_ALIAS_CHARS)]);
+        assert_eq!(settings.app_aliases[0].alias, "音乐");
     }
 
     #[test]

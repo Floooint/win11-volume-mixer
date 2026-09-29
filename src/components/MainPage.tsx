@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import {
+  type AppAlias,
   type AppAudio,
   type AppGroup,
   commands,
@@ -138,6 +139,53 @@ function EmptyState({
   );
 }
 
+/**
+ * 首次运行时询问是否开机自启。选择后写入系统注册并不再询问；
+ * 之后可在设置页修改。
+ */
+function AutostartPrompt() {
+  const save = useSettingsStore((s) => s.save);
+  const [error, setError] = useState<string | null>(null);
+  const answer = async (enabled: boolean) => {
+    if (enabled) {
+      const result = await commands.setAutostart(true);
+      if (result.status === "error") {
+        setError(result.error.message);
+        return;
+      }
+    }
+    await save({ autostartPrompt: false });
+  };
+  return (
+    <section
+      aria-label="开机自启"
+      className="mx-3 mb-2 rounded-xl border border-primary/40 bg-primary/7 px-3 py-2.5"
+    >
+      <p className="font-medium">是否开启开机自启动？</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        登录 Windows 后自动在托盘运行，不弹出窗口。之后可在设置中修改。
+      </p>
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      <div className="mt-2 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => void answer(false)}
+          className="rounded-md border border-border bg-card px-3 py-1 text-xs hover:bg-accent"
+        >
+          暂不开启
+        </button>
+        <button
+          type="button"
+          onClick={() => void answer(true)}
+          className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          开启
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function ErrorToast() {
   const error = useAudioStore((s) => s.error);
   const clearError = useAudioStore((s) => s.clearError);
@@ -161,6 +209,7 @@ function ErrorToast() {
 
 const NO_APPS: SavedApp[] = [];
 const NO_GROUPS: AppGroup[] = [];
+const NO_ALIASES: AppAlias[] = [];
 
 /** 列表动画的时长与曲线，与窗口高度动画（animation.rs 的 RESIZE）一致。 */
 const LIST_TRANSITION = { duration: 0.18, ease: [0.33, 1, 0.68, 1] } as const;
@@ -180,6 +229,9 @@ type Placement = { kind: "pinned" } | { kind: "group"; group: AppGroup } | { kin
  */
 function AppItem({
   app,
+  alias,
+  renaming,
+  onRenameDone,
   placement,
   groups,
   scrollAreaRef,
@@ -189,6 +241,12 @@ function AppItem({
   ref,
 }: {
   app: AppAudio;
+  /** 用户起的名称，优先于应用名显示。 */
+  alias: string | undefined;
+  /** 正在重命名：名称处显示输入框。 */
+  renaming: boolean;
+  /** 重命名结束：`name` 为新名称（空字符串恢复原名），取消时为 `null`。 */
+  onRenameDone: (name: string | null) => void;
   placement: Placement;
   groups: AppGroup[];
   scrollAreaRef: RefObject<HTMLElement | null>;
@@ -204,6 +262,7 @@ function AppItem({
   const isDebug = app.appId.startsWith(DEBUG_APP_PREFIX);
   const remember = canRemember(app.appId);
   const inGroup = placement.kind === "group";
+  const name = alias ?? app.name;
 
   const groupMenu: MenuItem = {
     label: inGroup ? "移到分组" : "添加到分组",
@@ -226,7 +285,8 @@ function AppItem({
       exit={{ opacity: 0, scale: 0.97 }}
       transition={LIST_TRANSITION}
       data-menu={menuData([
-        { label: "复制应用名", value: app.name },
+        { label: "复制应用名", value: name },
+        alias && { label: "复制原名", value: app.name },
         app.processName && { label: "复制进程名", value: app.processName },
         app.exePath && { label: "复制路径", value: app.exePath },
         remember && { separator: true },
@@ -238,6 +298,9 @@ function AppItem({
         remember && groupMenu,
         remember && inGroup && { label: "移出分组", action: `ungroup:${app.appId}` },
         remember && { label: "隐藏", action: `hide:${app.appId}` },
+        remember && { separator: true },
+        remember && { label: "重命名", action: `rename-app:${app.appId}` },
+        remember && alias && { label: "恢复原名", action: `reset-name:${app.appId}` },
       ])}
       className={cn(
         "group/app relative rounded-lg px-2 py-2 transition-colors",
@@ -258,8 +321,17 @@ function AppItem({
           <GripVertical size={12} />
         </span>
       )}
+      {renaming && (
+        <RenameField
+          label="应用名称"
+          initial={name}
+          placeholder={app.name}
+          onDone={onRenameDone}
+          className="absolute top-1.5 right-1 left-13 z-20"
+        />
+      )}
       <VolumeRow
-        name={app.name}
+        name={name}
         detail={
           [app.sessionCount > 1 ? `${app.sessionCount} 个会话` : null, isDebug ? "调试占位" : null]
             .filter(Boolean)
@@ -276,7 +348,7 @@ function AppItem({
             )}
             {isDebug && (
               <IconButton
-                label={`移除 ${app.name}`}
+                label={`移除 ${name}`}
                 onClick={() => debug.remove(app.appId)}
                 className="size-6"
               >
@@ -325,6 +397,9 @@ function GroupItem({
   group,
   apps,
   groups,
+  aliases,
+  renaming,
+  onRenameDone,
   scrollAreaRef,
   drag,
   onDragStart,
@@ -334,6 +409,10 @@ function GroupItem({
   /** 组内正在运行的应用。 */
   apps: AppAudio[];
   groups: AppGroup[];
+  aliases: Map<string, string>;
+  /** 正在重命名的对象：分组本身或组内某个应用。 */
+  renaming: Renaming | null;
+  onRenameDone: (name: string | null) => void;
   scrollAreaRef: RefObject<HTMLElement | null>;
   drag: DragState | null;
   onDragStart: (app: AppAudio, e: React.PointerEvent) => void;
@@ -375,6 +454,14 @@ function GroupItem({
     >
       {drag && !isSource && (
         <DropHint active={sameTarget(drag.target, target)} label="松手加入分组" />
+      )}
+      {renaming?.kind === "group" && renaming.id === group.id && (
+        <RenameField
+          label="分组名称"
+          initial={group.name}
+          onDone={onRenameDone}
+          className="absolute top-1.5 right-1 left-13 z-20"
+        />
       )}
       <VolumeRow
         name={group.name}
@@ -421,6 +508,9 @@ function GroupItem({
               <AppItem
                 key={app.appId}
                 app={app}
+                alias={aliases.get(app.appId)}
+                renaming={renaming?.kind === "app" && renaming.id === app.appId}
+                onRenameDone={onRenameDone}
                 placement={{ kind: "group", group }}
                 groups={groups}
                 scrollAreaRef={scrollAreaRef}
@@ -471,35 +561,55 @@ function DragBadge({ drag }: { drag: DragState }) {
   );
 }
 
-/** 分组改名：替换分组行的输入框，回车或失焦完成，Esc 取消。 */
-function GroupRename({
-  group,
+/** 正在重命名的分组或应用。 */
+type Renaming = { kind: "group" | "app"; id: string };
+
+/** 与后端 `config::MAX_ALIAS_CHARS` 一致。 */
+const MAX_NAME_CHARS = 40;
+
+/**
+ * 重命名输入框，覆盖在分组或应用的名称处。回车或失焦完成，Esc 取消。
+ * 完成时交出去掉首尾空白的名称（可能为空），取消时交出 `null`。
+ */
+function RenameField({
+  label,
+  initial,
+  placeholder,
   onDone,
-  ref,
+  className,
 }: {
-  group: AppGroup;
+  label: string;
+  initial: string;
+  placeholder?: string;
   onDone: (name: string | null) => void;
-  ref?: Ref<HTMLLIElement>;
+  className?: string;
 }) {
-  const [name, setName] = useState(group.name);
-  const finish = () => onDone(name.trim() || null);
+  const [name, setName] = useState(initial);
+  // Esc 后让输入框失焦，由失焦统一结束；此标记让失焦时按“取消”处理。
+  const cancelled = useRef(false);
   return (
-    <li ref={ref} className="rounded-lg border border-primary/60 px-2 py-2">
-      <input
-        autoFocus
-        aria-label="分组名称"
-        value={name}
-        maxLength={40}
-        onChange={(e) => setName(e.target.value)}
-        onFocus={(e) => e.currentTarget.select()}
-        onBlur={finish}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-          if (e.key === "Escape") onDone(null);
-        }}
-        className="w-full rounded-md border border-input bg-background px-2 py-1 text-foreground"
-      />
-    </li>
+    <input
+      autoFocus
+      aria-label={label}
+      value={name}
+      placeholder={placeholder}
+      maxLength={MAX_NAME_CHARS}
+      onChange={(e) => setName(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={() => onDone(cancelled.current ? null : name.trim())}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          cancelled.current = true;
+          e.currentTarget.blur();
+        }
+      }}
+      className={cn(
+        "rounded-md border border-primary/60 bg-background px-2 py-1 text-sm text-foreground shadow-sm",
+        "outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        className,
+      )}
+    />
   );
 }
 
@@ -516,6 +626,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   const masterAtBottom = useSettingsStore((s) => s.settings?.masterAtBottom ?? false);
   const appsReversed = useSettingsStore((s) => s.settings?.appsReversed ?? false);
+  const autostartPrompt = useSettingsStore((s) => s.settings?.autostartPrompt ?? false);
 
   const device = snapshot?.device;
   const masterSection = device && (
@@ -544,6 +655,9 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const removeFromGroup = useSettingsStore((s) => s.removeFromGroup);
   const updateGroup = useSettingsStore((s) => s.updateGroup);
   const deleteGroup = useSettingsStore((s) => s.deleteGroup);
+  const renameApp = useSettingsStore((s) => s.renameApp);
+  const appAliases = useSettingsStore((s) => s.settings?.appAliases ?? NO_ALIASES);
+  const aliases = new Map(appAliases.map((a) => [a.appId, a.alias]));
 
   // 列表由三部分组成：置顶的应用、分组、其余应用（后端顺序：活跃在前，再按名称）。隐藏的不显示。
   const hidden = new Set(hiddenApps.map((a) => a.appId));
@@ -587,7 +701,17 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   };
   const { drag, start: startDrag } = useAppDrag(moveTo);
 
-  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<Renaming | null>(null);
+  const finishRename = (name: string | null) => {
+    const target = renaming;
+    setRenaming(null);
+    if (!target || name === null) return;
+    if (target.kind === "group") {
+      if (name) void updateGroup(target.id, { name });
+    } else {
+      void renameApp(savedOf(target.id), name || null);
+    }
+  };
 
   // 右键菜单中的动作。回调在菜单关闭后才执行，通过 ref 读取最新状态。
   const latest = useRef({ moveTo, groups, savedOf, volumeOf });
@@ -626,14 +750,20 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
             break;
           }
           case "rename-group":
-            setRenaming(arg);
+            setRenaming({ kind: "group", id: arg });
+            break;
+          case "rename-app":
+            setRenaming({ kind: "app", id: arg });
+            break;
+          case "reset-name":
+            void renameApp(savedOf(arg), null);
             break;
           case "delete-group":
             void deleteGroup(arg);
             break;
         }
       }),
-    [hideApp, createGroup, addToGroup, updateGroup, deleteGroup],
+    [hideApp, createGroup, addToGroup, updateGroup, deleteGroup, renameApp],
   );
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -674,6 +804,8 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           </IconButton>
         </div>
       </header>
+
+      {autostartPrompt && <AutostartPrompt />}
 
       {/* 系统音量固定在顶部（或底部），只有应用列表滚动。 */}
       {device && !masterAtBottom && (
@@ -731,36 +863,38 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
               <AnimatePresence initial={false} mode="popLayout">
                 {entries.map((entry) =>
                   entry.kind === "group" ? (
-                    renaming === entry.group.id ? (
-                      <GroupRename
-                        key={entry.group.id}
-                        group={entry.group}
-                        onDone={(name) => {
-                          if (name) void updateGroup(entry.group.id, { name });
-                          setRenaming(null);
-                        }}
-                      />
-                    ) : (
-                      <GroupItem
-                        key={entry.group.id}
-                        group={entry.group}
-                        apps={groupApps(entry.group)}
-                        groups={groups}
-                        scrollAreaRef={scrollRef}
-                        drag={drag}
-                        onDragStart={(app, e) => startDrag(app.appId, app.name, "group", e)}
-                      />
-                    )
+                    <GroupItem
+                      key={entry.group.id}
+                      group={entry.group}
+                      apps={groupApps(entry.group)}
+                      groups={groups}
+                      aliases={aliases}
+                      renaming={renaming}
+                      onRenameDone={finishRename}
+                      scrollAreaRef={scrollRef}
+                      drag={drag}
+                      onDragStart={(app, e) =>
+                        startDrag(app.appId, aliases.get(app.appId) ?? app.name, "group", e)
+                      }
+                    />
                   ) : (
                     <AppItem
                       key={entry.app.appId}
                       app={entry.app}
+                      alias={aliases.get(entry.app.appId)}
+                      renaming={renaming?.kind === "app" && renaming.id === entry.app.appId}
+                      onRenameDone={finishRename}
                       placement={entry.placement}
                       groups={groups}
                       scrollAreaRef={scrollRef}
                       dragging={drag?.appId === entry.app.appId}
                       onDragStart={(e) =>
-                        startDrag(entry.app.appId, entry.app.name, entry.placement.kind, e)
+                        startDrag(
+                          entry.app.appId,
+                          aliases.get(entry.app.appId) ?? entry.app.name,
+                          entry.placement.kind,
+                          e,
+                        )
                       }
                     />
                   ),

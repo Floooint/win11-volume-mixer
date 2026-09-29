@@ -145,7 +145,7 @@ function WidthSetting({
 }
 
 /**
- * 开机自启。状态直接读写系统中的注册，不经过设置文件。默认开启（首次运行时由后端开启）。
+ * 开机自启。状态直接读写系统中的注册，不经过设置文件。首次运行时在主界面询问，没有默认值。
  */
 function AutostartSetting() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -170,8 +170,6 @@ function AutostartSetting() {
     <SettingRow
       title="开机自启"
       help="登录 Windows 后自动启动到托盘，不弹出窗口"
-      isDefault={enabled}
-      onReset={() => void change(true)}
       below={error && <p className="text-xs text-destructive">{error}</p>}
     >
       <Switch label="开机自启" checked={enabled} onChange={(next) => void change(next)} />
@@ -227,6 +225,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const save = useSettingsStore((s) => s.save);
   const unpinApp = useSettingsStore((s) => s.unpinApp);
   const unhideApp = useSettingsStore((s) => s.unhideApp);
+  const renameApp = useSettingsStore((s) => s.renameApp);
   const [refreshRate, setRefreshRate] = useState<number | null>(null);
   /** 本次在设置页改过“硬件加速”，提示需要重启。 */
   const [restartNeeded, setRestartNeeded] = useState(false);
@@ -244,6 +243,12 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
     !settings || !defaults || settings[key] === defaults[key];
   const reset = <K extends keyof NonNullable<typeof settings>>(key: K) =>
     defaults && save({ [key]: defaults[key] });
+  /** 置顶 / 隐藏列表中，重命名过的应用显示新名称。 */
+  const withAliases = (apps: SavedApp[]) =>
+    apps.map((app) => ({
+      ...app,
+      name: settings?.appAliases.find((a) => a.appId === app.appId)?.alias ?? app.name,
+    }));
 
   return (
     <div ref={rootRef} className="flex h-full flex-col">
@@ -355,7 +360,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               </Section>
 
               {/* 只显示有内容的一项；都没有时整张卡片不显示（置顶和隐藏在主界面右键菜单中操作）。 */}
-              {(settings.pinnedApps.length > 0 || settings.hiddenApps.length > 0) && (
+              {(settings.pinnedApps.length > 0 ||
+                settings.hiddenApps.length > 0 ||
+                settings.appAliases.length > 0) && (
                 <Section title="应用">
                   {settings.pinnedApps.length > 0 && (
                     <SettingRow
@@ -363,7 +370,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       help="在主界面右键应用选择“置顶”。置顶的应用排在最前，可拖动左侧手柄调整顺序"
                       below={
                         <SavedAppList
-                          apps={settings.pinnedApps}
+                          apps={withAliases(settings.pinnedApps)}
                           actionLabel="取消置顶"
                           onAction={(appId) => void unpinApp(appId)}
                         />
@@ -376,9 +383,28 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       help="在主界面右键应用选择“隐藏”。隐藏的应用不在列表中显示，音量不受影响"
                       below={
                         <SavedAppList
-                          apps={settings.hiddenApps}
+                          apps={withAliases(settings.hiddenApps)}
                           actionLabel="取消隐藏"
                           onAction={(appId) => void unhideApp(appId)}
+                        />
+                      }
+                    />
+                  )}
+                  {settings.appAliases.length > 0 && (
+                    <SettingRow
+                      title="重命名的应用"
+                      help="在主界面右键应用选择“重命名”。只改变本程序中显示的名称"
+                      below={
+                        <SavedAppList
+                          apps={settings.appAliases.map((a) => ({
+                            appId: a.appId,
+                            name: `${a.alias}（${a.name}）`,
+                          }))}
+                          actionLabel="恢复原名"
+                          onAction={(appId) => {
+                            const app = settings.appAliases.find((a) => a.appId === appId);
+                            if (app) void renameApp(app, null);
+                          }}
                         />
                       }
                     />

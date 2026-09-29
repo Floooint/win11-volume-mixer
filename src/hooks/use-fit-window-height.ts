@@ -49,10 +49,12 @@ export function useFitWindowHeight(
       });
     };
 
-    // 内容变化（应用增减）和窗口尺寸变化（固定部分高度）都需要重新测量。
+    // 内容变化（应用增减）、窗口尺寸变化，以及固定部分高度变化（如首次运行的询问关闭，
+    // 此时只有滚动区变高，根元素和内容都不变）都需要重新测量。
     const observer = new ResizeObserver(measure);
     observer.observe(content);
     observer.observe(root);
+    observer.observe(scroll);
     measure();
 
     return () => {

@@ -82,6 +82,9 @@ pub struct WindowState {
     /// 且同一数据目录下参数必须一致，因此整个程序运行期间固定使用这个值，改设置后重启生效。
     hardware_acceleration: OnceLock<bool>,
     pin: Mutex<PinMode>,
+    /// 首次运行时自动打开的窗口在回答“是否开机自启”之前不因失焦隐藏：
+    /// 启动程序的窗口（如安装程序）随后可能夺回焦点，询问会一闪而过。
+    hold_open: AtomicBool,
 }
 
 struct Pending {
@@ -307,10 +310,23 @@ fn disable_system_transitions<R: Runtime>(window: &WebviewWindow<R>) {
 }
 
 /// 启动时调用：常驻和智能模式下预先创建窗口，首次打开也能立即显示。
-pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+/// `show` 为 `true` 时（首次运行）创建后立即在托盘位置 `tray` 附近显示。
+pub fn init<R: Runtime>(app: &AppHandle<R>, show: bool, tray: Option<Rect>) -> tauri::Result<()> {
     let policy = policy(app);
     eprintln!("[window] 运行模式：{policy:?}");
-    if policy != WindowPolicy::Silent {
+    if show {
+        app.state::<WindowState>()
+            .hold_open
+            .store(true, Ordering::SeqCst);
+        // 等前端渲染完成后由 `ready` 显示。
+        if let Ok(mut pending) = app.state::<WindowState>().pending.lock() {
+            *pending = Some(Pending {
+                tray,
+                requested_at: Instant::now(),
+            });
+        }
+        create(app)?;
+    } else if policy != WindowPolicy::Silent {
         create(app)?;
     }
     Ok(())
@@ -755,6 +771,14 @@ pub fn set_pin_mode<R: Runtime>(window: &WebviewWindow<R>, mode: PinMode) {
     }
 }
 
+/// 已回答首次运行的询问，窗口恢复失焦自动隐藏。
+pub fn release_hold<R: Runtime, M: Manager<R>>(manager: &M) {
+    manager
+        .state::<WindowState>()
+        .hold_open
+        .store(false, Ordering::SeqCst);
+}
+
 /// 托盘左键点击：窗口可见则隐藏，否则在托盘附近显示。
 pub fn toggle<R: Runtime>(app: &AppHandle<R>, tray: Rect) {
     let just_hidden = app
@@ -783,7 +807,12 @@ pub fn handle_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) 
     match event {
         // 新建窗口在渲染完成前不可见，此时的失焦事件忽略。
         WindowEvent::Focused(false)
-            if window.is_visible().unwrap_or(false) && pin_mode(window).hides_on_blur() =>
+            if window.is_visible().unwrap_or(false)
+                && pin_mode(window).hides_on_blur()
+                && !window
+                    .state::<WindowState>()
+                    .hold_open
+                    .load(Ordering::SeqCst) =>
         {
             if let Ok(mut t) = window.state::<WindowState>().hidden_at.lock() {
                 *t = Some(Instant::now());

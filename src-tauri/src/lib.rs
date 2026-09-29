@@ -111,7 +111,6 @@ pub fn run() {
 
             // 设置必须在创建窗口之前加载：窗口隐藏策略由它决定。
             app.manage(config::Config::load(app.handle()));
-            autostart::enable_on_first_run(app.handle());
 
             let handle = app.handle().clone();
             app.manage(AudioService::start(move |update| match update {
@@ -120,7 +119,9 @@ pub fn run() {
             }));
             accent::watch(app.handle());
             tray::create(app)?;
-            window::init(app.handle())?;
+            // 首次运行时打开窗口，询问是否开机自启（平时启动只在托盘）。
+            let first_run = app.state::<config::Config>().is_first_run();
+            window::init(app.handle(), first_run, tray::rect(app.handle()))?;
             Ok(())
         })
         .build(tauri::generate_context!())
