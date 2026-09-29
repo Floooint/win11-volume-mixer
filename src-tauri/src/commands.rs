@@ -191,37 +191,24 @@ pub fn preview_window_width(window: tauri::WebviewWindow, width: u32) {
     crate::window::preview_width(&window, Some(width));
 }
 
-/// 鼠标在应用上停留后显示详情浮窗。`anchor_top` 为应用行上边缘相对窗口内容区的位置（逻辑像素）。
+/// 点击应用行：显示它的详情浮窗，已在显示这个应用时隐藏。
+/// `anchor_top` 为应用行上边缘相对窗口内容区的位置（逻辑像素）。
 /// 必须是异步命令：Windows 上在同步命令（主线程）中创建窗口，WebView 无法完成创建。
 #[tauri::command]
 #[specta::specta]
-pub async fn show_app_details(
+pub async fn toggle_app_details(
     app: tauri::AppHandle,
     details: crate::details::AppDetails,
     anchor_top: f64,
 ) {
-    crate::details::show(&app, details, anchor_top);
+    crate::details::toggle(&app, details, anchor_top);
 }
 
-/// 在应用行上按下或滚动时立即隐藏详情浮窗。
+/// 点击主窗口其他位置、列表滚动或开始拖动时隐藏详情浮窗。
 #[tauri::command]
 #[specta::specta]
 pub fn hide_app_details(app: tauri::AppHandle) {
     crate::details::hide(&app);
-}
-
-/// 鼠标离开应用行：稍后隐藏详情浮窗，期间鼠标移到浮窗上则保持显示。
-#[tauri::command]
-#[specta::specta]
-pub fn hide_app_details_soon(app: tauri::AppHandle) {
-    crate::details::hide_soon(&app);
-}
-
-/// 详情浮窗报告鼠标移入 / 移出。
-#[tauri::command]
-#[specta::specta]
-pub fn set_details_hovered(app: tauri::AppHandle, hovered: bool) {
-    crate::details::set_hovered(&app, hovered);
 }
 
 /// 在资源管理器中打开文件所在的文件夹并选中它（详情浮窗中点击路径）。

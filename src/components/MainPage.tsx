@@ -38,7 +38,7 @@ import { VolumeRow } from "@/components/VolumeRow";
 import { type DragState, type DropTarget, sameTarget, useAppDrag } from "@/hooks/use-app-drag";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
 import { type MenuItem, menuData, onMenuAction } from "@/lib/context-menu";
-import { cancelHoverDetails, leaveHoverDetails, startHoverDetails } from "@/lib/hover-details";
+import { closeAppDetails, closeAppDetailsOnPointerDown, toggleAppDetails } from "@/lib/app-details";
 import { cn } from "@/lib/utils";
 import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
@@ -203,7 +203,7 @@ function AppItem({
   groups,
   scrollAreaRef,
   dragging,
-  hoverDisabled,
+  detailsDisabled,
   onDragStart,
   onVolumeChange,
   ref,
@@ -219,8 +219,8 @@ function AppItem({
   groups: AppGroup[];
   scrollAreaRef: RefObject<HTMLElement | null>;
   dragging: boolean;
-  /** 拖动或重命名期间不显示悬停详情。 */
-  hoverDisabled: boolean;
+  /** 拖动或重命名期间点击不显示详情。 */
+  detailsDisabled: boolean;
   onDragStart: (e: React.PointerEvent) => void;
   /** 分组内的应用单独调节时，需要同时记下它在组音量 100% 时的音量。 */
   onVolumeChange?: (volume: number) => void;
@@ -254,11 +254,9 @@ function AppItem({
       animate={{ opacity: dragging ? 0.4 : 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.97 }}
       transition={LIST_TRANSITION}
-      // 停留 3 秒显示详情；分组内的应用行嵌在分组行中，进入 / 离开各自计算。
-      onPointerEnter={(e) => !hoverDisabled && startHoverDetails(e, { app, alias: alias ?? null })}
-      onPointerLeave={() => leaveHoverDetails(app.appId)}
-      onPointerDown={cancelHoverDetails}
-      onWheel={cancelHoverDetails}
+      // 点击显示 / 隐藏详情（滑块、按钮等控件除外）。
+      data-details-row
+      onClick={(e) => !detailsDisabled && toggleAppDetails(e, { app, alias: alias ?? null })}
       data-menu={menuData([
         { label: "复制应用名", value: name },
         alias && { label: "复制原名", value: app.name },
@@ -287,6 +285,7 @@ function AppItem({
         <span
           aria-hidden
           title="拖动到置顶区或分组"
+          data-no-details
           onPointerDown={onDragStart}
           className={cn(
             "absolute top-1/2 left-0 flex h-8 w-2.5 -translate-y-1/2 cursor-grab touch-none items-center justify-center",
@@ -320,6 +319,7 @@ function AppItem({
             <span
               onPointerDown={onDragStart}
               title="拖动到置顶区或分组"
+              data-no-details
               className="block cursor-grab touch-none active:cursor-grabbing"
             >
               <AppAvatar key={app.icon ?? ""} app={app} />
@@ -503,7 +503,7 @@ function GroupItem({
                 groups={groups}
                 scrollAreaRef={scrollAreaRef}
                 dragging={drag?.appId === app.appId}
-                hoverDisabled={!!drag || renaming !== null}
+                detailsDisabled={!!drag || renaming !== null}
                 onDragStart={(e) => onDragStart(app, e)}
                 onVolumeChange={(v) => void setMemberVolume(group.id, app.appId, v)}
               />
@@ -895,8 +895,14 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     ],
   );
 
-  // 切换到设置页时收起详情浮窗。
-  useEffect(() => cancelHoverDetails, []);
+  // 点击应用行以外的位置时收起详情浮窗；切换到设置页时也收起。
+  useEffect(() => {
+    document.addEventListener("pointerdown", closeAppDetailsOnPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeAppDetailsOnPointerDown, true);
+      closeAppDetails();
+    };
+  }, []);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -973,6 +979,8 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
       <motion.div
         ref={scrollRef}
         layoutScroll
+        // 列表滚动后应用行移了位置，收起详情浮窗。
+        onScroll={closeAppDetails}
         className="scroll-area min-h-0 flex-1 overflow-y-auto"
       >
         <div ref={contentRef} className={device && masterAtBottom ? "pb-2" : "pb-3"}>
@@ -1039,7 +1047,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                       groups={groups}
                       scrollAreaRef={scrollRef}
                       dragging={drag?.appId === entry.app.appId}
-                      hoverDisabled={!!drag || renaming !== null}
+                      detailsDisabled={!!drag || renaming !== null}
                       onDragStart={(e) =>
                         startDrag(
                           entry.app.appId,

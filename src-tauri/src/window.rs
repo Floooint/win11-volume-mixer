@@ -783,21 +783,6 @@ pub fn set_pin_mode<R: Runtime>(window: &WebviewWindow<R>, mode: PinMode) {
     }
 }
 
-/// 详情浮窗隐藏后调用：鼠标在浮窗上期间主窗口已失去焦点时，此时补上失焦隐藏。
-pub fn hide_if_unfocused<R: Runtime>(app: &AppHandle<R>) {
-    let Some(window) = main_window(app) else {
-        return;
-    };
-    let state = app.state::<WindowState>();
-    if window.is_visible().unwrap_or(false)
-        && !window.is_focused().unwrap_or(true)
-        && pin_mode(app).hides_on_blur()
-        && !state.hold_open.load(Ordering::SeqCst)
-    {
-        hide(&window.as_ref().window());
-    }
-}
-
 /// 已回答首次运行的询问，窗口恢复失焦自动隐藏。
 pub fn release_hold<R: Runtime, M: Manager<R>>(manager: &M) {
     manager
@@ -827,33 +812,58 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, tray: Rect) {
 }
 
 /// 失焦自动隐藏；关闭请求（如 Alt+F4）改为隐藏，程序继续在托盘运行。
+///
+/// 主窗口和详情浮窗算作一个整体：点击浮窗（WebView2 会激活它）或从浮窗点回主窗口时，
+/// 焦点只是在两者之间切换，不算失焦。焦点离开两者时收起浮窗，主窗口按固定模式决定是否隐藏。
 pub fn handle_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) {
-    if window.label() != MAIN {
+    let label = window.label();
+    if label != MAIN && label != crate::details::LABEL {
         return;
     }
     match event {
-        // 新建窗口在渲染完成前不可见，此时的失焦事件忽略。
-        WindowEvent::Focused(false)
-            if window.is_visible().unwrap_or(false)
-                && pin_mode(window).hides_on_blur()
-                // 鼠标在详情浮窗上（如点击路径打开了资源管理器）：移出浮窗后再处理。
-                && !crate::details::is_hovered(window)
-                && !window
-                    .state::<WindowState>()
-                    .hold_open
-                    .load(Ordering::SeqCst) =>
-        {
-            if let Ok(mut t) = window.state::<WindowState>().hidden_at.lock() {
-                *t = Some(Instant::now());
-            }
-            hide(window);
+        WindowEvent::Focused(false) if !foreground_is_ours(window) => {
+            crate::details::hide(window);
+            hide_on_blur(window.app_handle());
         }
-        WindowEvent::CloseRequested { api, .. } => {
+        WindowEvent::CloseRequested { api, .. } if label == MAIN => {
             api.prevent_close();
             hide(window);
         }
         _ => {}
     }
+}
+
+/// 前台窗口是主窗口或详情浮窗。失焦事件到达时前台窗口已经切换。
+fn foreground_is_ours<R: Runtime, M: Manager<R>>(manager: &M) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    // SAFETY: 只读取前台窗口句柄。
+    let foreground = unsafe { GetForegroundWindow() };
+    [MAIN, crate::details::LABEL].iter().any(|label| {
+        manager
+            .get_webview_window(label)
+            .and_then(|w| w.hwnd().ok())
+            .is_some_and(|hwnd| hwnd.0 == foreground.0)
+    })
+}
+
+/// 焦点离开主窗口和详情浮窗：按固定模式隐藏主窗口。
+fn hide_on_blur<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = main_window(app) else {
+        return;
+    };
+    let state = app.state::<WindowState>();
+    // 新建窗口在渲染完成前不可见，此时的失焦事件忽略。
+    if !window.is_visible().unwrap_or(false)
+        || !pin_mode(app).hides_on_blur()
+        || state.hold_open.load(Ordering::SeqCst)
+    {
+        return;
+    }
+    // 记下隐藏时间：点击托盘图标导致的失焦隐藏后，同一次点击不再重新打开窗口。
+    if let Ok(mut t) = state.hidden_at.lock() {
+        *t = Some(Instant::now());
+    }
+    hide(&window.as_ref().window());
 }
 
 #[cfg(test)]

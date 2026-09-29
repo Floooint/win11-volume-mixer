@@ -45,16 +45,13 @@ export const commands = {
 } | null>("get_accent_colors"),
 	setAutostart: (enabled: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_autostart", { enabled })),
 	/**
-	 *  鼠标在应用上停留后显示详情浮窗。`anchor_top` 为应用行上边缘相对窗口内容区的位置（逻辑像素）。
+	 *  点击应用行：显示它的详情浮窗，已在显示这个应用时隐藏。
+	 *  `anchor_top` 为应用行上边缘相对窗口内容区的位置（逻辑像素）。
 	 *  必须是异步命令：Windows 上在同步命令（主线程）中创建窗口，WebView 无法完成创建。
 	 */
-	showAppDetails: (details: AppDetails, anchorTop: number) => __TAURI_INVOKE<void>("show_app_details", { details, anchorTop }),
-	/**  在应用行上按下或滚动时立即隐藏详情浮窗。 */
+	toggleAppDetails: (details: AppDetails, anchorTop: number) => __TAURI_INVOKE<void>("toggle_app_details", { details, anchorTop }),
+	/**  点击主窗口其他位置、列表滚动或开始拖动时隐藏详情浮窗。 */
 	hideAppDetails: () => __TAURI_INVOKE<void>("hide_app_details"),
-	/**  鼠标离开应用行：稍后隐藏详情浮窗，期间鼠标移到浮窗上则保持显示。 */
-	hideAppDetailsSoon: () => __TAURI_INVOKE<void>("hide_app_details_soon"),
-	/**  详情浮窗报告鼠标移入 / 移出。 */
-	setDetailsHovered: (hovered: boolean) => __TAURI_INVOKE<void>("set_details_hovered", { hovered }),
 	/**  在资源管理器中打开文件所在的文件夹并选中它（详情浮窗中点击路径）。 */
 	revealInFolder: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_in_folder", { path })),
 	/**  详情浮窗首次加载时读取要显示的内容；之后的更新通过 `details://show` 事件推送。 */

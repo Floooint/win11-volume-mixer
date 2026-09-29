@@ -88,11 +88,8 @@ export function DetailsView() {
   const { app, alias } = details;
   const percent = Math.round(app.volume.volume * 100);
   return (
-    // 鼠标在浮窗上时保持显示（离开应用行后浮窗会稍后隐藏，见 src-tauri/src/details.rs）。
     <div
       ref={contentRef}
-      onPointerEnter={() => void commands.setDetailsHovered(true)}
-      onPointerLeave={() => void commands.setDetailsHovered(false)}
       className="flex flex-col gap-3 p-3 text-xs"
     >
       <div className="flex items-center gap-3">
