@@ -28,8 +28,8 @@ pub const LABEL: &str = "details";
 /// 浮窗宽度与离主窗口的间距（逻辑像素）。
 const WIDTH: f64 = 300.0;
 const GAP: f64 = 8.0;
-/// 离开应用行后等多久隐藏：留出把鼠标移到浮窗上的时间。
-const HIDE_DELAY: Duration = Duration::from_millis(300);
+/// 鼠标离开应用行或浮窗后等多久隐藏：留出把鼠标移到浮窗上的时间。
+const HIDE_DELAY: Duration = Duration::from_millis(1000);
 
 /// 浮窗显示的内容。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
