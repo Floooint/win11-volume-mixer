@@ -30,6 +30,9 @@ export const commands = {
 	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),
 	/**  设置页拖动宽度滑块时预览窗口宽度（逻辑像素），不写入设置；松手后由 `set_settings` 保存。 */
 	previewWindowWidth: (width: number) => __TAURI_INVOKE<void>("preview_window_width", { width }),
+	/**  是否开机自启（读取系统中的实际注册状态）。 */
+	getAutostart: () => __TAURI_INVOKE<boolean>("get_autostart"),
+	setAutostart: (enabled: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_autostart", { enabled })),
 };
 
 /** Events */

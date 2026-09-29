@@ -1,5 +1,6 @@
 mod animation;
 mod audio;
+mod autostart;
 mod clipboard;
 mod commands;
 mod config;
@@ -37,6 +38,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_default_settings,
             commands::set_settings,
             commands::preview_window_width,
+            commands::get_autostart,
+            commands::set_autostart,
         ])
         .events(collect_events![
             events::AudioSnapshotEvent,
@@ -69,6 +72,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             window::show(app, None);
         }))
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .manage(window::WindowState::default())
         .manage(feedback::Feedback::default())
         .manage(icon::IconService::start())
@@ -84,6 +88,7 @@ pub fn run() {
 
             // 设置必须在创建窗口之前加载：窗口隐藏策略由它决定。
             app.manage(config::Config::load(app.handle()));
+            autostart::enable_on_first_run(app.handle());
 
             let handle = app.handle().clone();
             app.manage(AudioService::start(move |update| match update {

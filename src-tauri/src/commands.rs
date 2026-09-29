@@ -96,6 +96,19 @@ pub fn get_settings(config: State<'_, Config>) -> Settings {
     config.get()
 }
 
+/// 是否开机自启（读取系统中的实际注册状态）。
+#[tauri::command]
+#[specta::specta]
+pub fn get_autostart(app: tauri::AppHandle) -> bool {
+    crate::autostart::is_enabled(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> AppResult<()> {
+    crate::autostart::set_enabled(&app, enabled)
+}
+
 /// 各设置项的默认值。设置页据此判断是否显示“恢复默认”。
 #[tauri::command]
 #[specta::specta]

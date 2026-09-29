@@ -85,6 +85,41 @@ function WidthSetting({
   );
 }
 
+/**
+ * 开机自启。状态直接读写系统中的注册，不经过设置文件。默认开启（首次运行时由后端开启）。
+ */
+function AutostartSetting() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    commands.getAutostart().then(setEnabled);
+  }, []);
+
+  const change = async (next: boolean) => {
+    setEnabled(next);
+    const result = await commands.setAutostart(next);
+    if (result.status === "error") {
+      setError(result.error.message);
+      setEnabled(await commands.getAutostart());
+    } else {
+      setError(null);
+    }
+  };
+
+  if (enabled === null) return null;
+  return (
+    <SettingRow
+      title="开机自启"
+      help="登录 Windows 后自动启动到托盘，不弹出窗口"
+      isDefault={enabled}
+      onReset={() => void change(true)}
+      below={error && <p className="text-xs text-destructive">{error}</p>}
+    >
+      <Switch label="开机自启" checked={enabled} onChange={(next) => void change(next)} />
+    </SettingRow>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
@@ -133,6 +168,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           {settings && (
             <>
               <Section title="运行">
+                <AutostartSetting />
                 <SettingRow
                   title="运行模式"
                   help={MODES_HELP}

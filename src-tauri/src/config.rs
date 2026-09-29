@@ -95,6 +95,8 @@ impl Settings {
 pub struct Config {
     path: Option<PathBuf>,
     settings: Mutex<Settings>,
+    /// 启动时设置文件还不存在，即首次运行。
+    first_run: bool,
 }
 
 impl Config {
@@ -105,6 +107,7 @@ impl Config {
             .app_config_dir()
             .ok()
             .map(|dir| dir.join(FILE_NAME));
+        let first_run = path.as_ref().is_some_and(|p| !p.exists());
         let mut settings: Settings = path
             .as_ref()
             .and_then(|p| fs::read_to_string(p).ok())
@@ -129,7 +132,12 @@ impl Config {
         Self {
             path,
             settings: Mutex::new(settings),
+            first_run,
         }
+    }
+
+    pub fn is_first_run(&self) -> bool {
+        self.first_run
     }
 
     pub fn get(&self) -> Settings {
