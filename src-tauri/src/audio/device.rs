@@ -143,7 +143,12 @@ impl IMMNotificationClient_Impl for DeviceNotifier_Impl {
         Ok(())
     }
 
-    fn OnPropertyValueChanged(&self, _device_id: &PCWSTR, _key: &PROPERTYKEY) -> Result<()> {
+    fn OnPropertyValueChanged(&self, _device_id: &PCWSTR, key: &PROPERTYKEY) -> Result<()> {
+        // 设备在系统设置中被改名。其他属性变化很频繁，不处理。
+        // 不区分是否为当前设备：改名很少发生，按设备变化整体重建即可。
+        if *key == PKEY_Device_FriendlyName {
+            let _ = self.tx.send(Msg::DefaultDeviceChanged);
+        }
         Ok(())
     }
 }

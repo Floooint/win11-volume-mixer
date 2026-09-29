@@ -9,6 +9,9 @@ use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
 use windows::Win32::Storage::Packaging::Appx::{GetApplicationUserModelId, GetPackageFamilyName};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
@@ -44,10 +47,13 @@ pub fn resolve(control: &IAudioSessionControl2) -> AppInfo {
 }
 
 fn from_process(pid: u32, display_name: Option<String>) -> AppInfo {
+    // 打不开进程时（受保护进程，如带反作弊的游戏）按 PID 区分，名称依次回退为
+    // 会话显示名、进程快照中的 exe 名、“未知应用”。
     let unknown = || AppInfo {
         app_id: format!("pid:{pid}"),
         name: display_name
             .clone()
+            .or_else(|| snapshot_exe_name(pid).map(|exe| file_stem(&exe)))
             .unwrap_or_else(|| format!("未知应用（PID {pid}）")),
         icon: None,
     };
@@ -88,6 +94,31 @@ fn image_path(process: HANDLE) -> Option<String> {
     }
     .ok()?;
     Some(String::from_utf16_lossy(&buf[..len as usize]))
+}
+
+/// 从进程快照中读取 exe 文件名。不需要打开进程，因此对受保护进程也有效，但只有文件名没有路径。
+fn snapshot_exe_name(pid: u32) -> Option<String> {
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.ok()?;
+    let mut entry = PROCESSENTRY32W {
+        dwSize: size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+    let mut found = None;
+    let mut ok = unsafe { Process32FirstW(snapshot, &mut entry) }.is_ok();
+    while ok {
+        if entry.th32ProcessID == pid {
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            found = Some(String::from_utf16_lossy(&entry.szExeFile[..len]));
+            break;
+        }
+        ok = unsafe { Process32NextW(snapshot, &mut entry) }.is_ok();
+    }
+    let _ = unsafe { CloseHandle(snapshot) };
+    found.filter(|name| !name.is_empty())
 }
 
 /// 仅打包（UWP / MSIX）应用有包家族名。
@@ -164,4 +195,31 @@ fn file_stem(path: &str) -> String {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 进程快照能读到当前进程的_exe_名() {
+        let name = snapshot_exe_name(std::process::id()).expect("找不到当前进程");
+        assert!(name.to_lowercase().ends_with(".exe"), "{name}");
+    }
+
+    #[test]
+    fn 打不开的进程回退为_exe_名() {
+        // PID 4 是 System 进程，普通权限下无法查询路径，但进程快照中有名称。
+        let info = from_process(4, None);
+        assert_eq!(info.app_id, "pid:4");
+        assert_eq!(info.name, "System");
+        assert_eq!(info.icon, None);
+    }
+
+    #[test]
+    fn 不存在的进程显示为未知应用() {
+        // PID 总是 4 的倍数，奇数 PID 不会存在。
+        let info = from_process(7, None);
+        assert_eq!(info.name, "未知应用（PID 7）");
+    }
 }

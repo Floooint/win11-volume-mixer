@@ -1,10 +1,18 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { type AppAudio, commands } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Plus } from "@/components/animate-ui/icons/plus";
 import { Settings as SettingsIcon } from "@/components/animate-ui/icons/settings";
 import { Trash2 } from "@/components/animate-ui/icons/trash-2";
+import { VolumeOff } from "@/components/animate-ui/icons/volume-off";
 import { IconButton } from "@/components/IconButton";
 import { MainPageSkeleton, Skeleton } from "@/components/Skeleton";
 import { VolumeRow } from "@/components/VolumeRow";
@@ -55,6 +63,28 @@ function AppAvatar({ app }: { app: AppAudio }) {
       )}
     >
       {letter}
+    </div>
+  );
+}
+
+/** 列表区域的空状态或错误状态。 */
+function EmptyState({
+  icon,
+  title,
+  hint,
+  action,
+}: {
+  icon: ReactNode;
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1 px-6 py-10 text-center text-sm text-muted-foreground">
+      <div className="mb-1">{icon}</div>
+      <p className="text-foreground">{title}</p>
+      {hint && <p className="text-xs">{hint}</p>}
+      {action}
     </div>
   );
 }
@@ -135,6 +165,8 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const snapshot = useAudioStore((s) => s.snapshot);
   const setMasterVolume = useAudioStore((s) => s.setMasterVolume);
   const setMasterMute = useAudioStore((s) => s.setMasterMute);
+  const loadError = useAudioStore((s) => s.loadError);
+  const retry = useAudioStore((s) => s.retry);
   const debugApps = useDebugStore((s) => s.apps);
   const addDebugApp = useDebugStore((s) => s.add);
   const clearDebugApps = useDebugStore((s) => s.clear);
@@ -208,15 +240,34 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
 
       <div ref={scrollRef} className="scroll-area min-h-0 flex-1 overflow-y-auto">
         <div ref={contentRef} className={device && masterAtBottom ? "pb-2" : "pb-3"}>
-          {snapshot === null ? (
+          {snapshot === null && loadError ? (
+            <EmptyState
+              icon={<VolumeOff size={24} />}
+              title="无法读取音频设备"
+              hint={loadError}
+              action={
+                <button
+                  type="button"
+                  onClick={() => void retry()}
+                  className="mt-1 rounded-md border border-border bg-card px-3 py-1 text-foreground hover:bg-accent"
+                >
+                  重试
+                </button>
+              }
+            />
+          ) : snapshot === null ? (
             <MainPageSkeleton masterAtBottom={masterAtBottom} />
           ) : !device ? (
-            <p className="px-4 py-8 text-center text-sm text-muted-foreground">未检测到输出设备</p>
+            <EmptyState
+              icon={<VolumeOff size={24} />}
+              title="未检测到输出设备"
+              hint="连接扬声器或耳机后会自动显示"
+            />
           ) : apps.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
-              <AudioLines size={24} animateOnView loop />
-              <p>暂无正在使用声音的应用</p>
-            </div>
+            <EmptyState
+              icon={<AudioLines size={24} animateOnView loop />}
+              title="暂无正在使用声音的应用"
+            />
           ) : (
             // 可滚动时滚轮用于滚动列表，不调节应用音量；系统音量不受影响。
             <ul className="flex flex-col gap-1 pr-1 pl-3">

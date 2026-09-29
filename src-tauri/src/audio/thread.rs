@@ -135,7 +135,10 @@ impl State {
             pending: Pending::default(),
             reported_master: None,
         };
-        state.open_device()?;
+        // 打开设备失败时按“没有设备”继续运行，之后设备变化时会重试；
+        // 若直接返回错误，音频线程会退出，程序只能重启才能恢复。
+        let result = state.open_device();
+        state.log_err(result);
         state.last = state.snapshot();
         state.report_master();
         Ok(state)

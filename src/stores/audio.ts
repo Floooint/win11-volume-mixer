@@ -12,8 +12,12 @@ type AudioState = {
   snapshot: AudioSnapshot | null;
   /** 最近一次失败的提示，由界面展示后自动清除。 */
   error: string | null;
+  /** 首次获取状态失败的原因。此时没有快照可显示，界面显示错误和“重试”。 */
+  loadError: string | null;
   /** 获取初始状态并订阅后端事件，返回取消订阅函数。 */
   connect: () => () => void;
+  /** 首次获取失败后重试。 */
+  retry: () => Promise<void>;
   setMasterVolume: (volume: number) => void;
   setMasterMute: (muted: boolean) => void;
   setAppVolume: (appId: string, volume: number) => void;
@@ -61,7 +65,13 @@ export const useAudioStore = create<AudioState>((set, get) => {
 
   const refresh = async () => {
     const result = await commands.getSnapshot();
-    if (result.status === "ok") set({ snapshot: result.data });
+    if (result.status === "ok") set({ snapshot: result.data, loadError: null });
+  };
+
+  const load = async () => {
+    const result = await commands.getSnapshot();
+    if (result.status === "ok") set({ snapshot: result.data, error: null, loadError: null });
+    else set({ loadError: result.error.message });
   };
 
   /**
@@ -80,6 +90,7 @@ export const useAudioStore = create<AudioState>((set, get) => {
   return {
     snapshot: null,
     error: null,
+    loadError: null,
     connect: () => {
       // 先订阅再获取快照，避免两者之间的变化丢失。
       const listeners = Promise.all([
@@ -89,12 +100,7 @@ export const useAudioStore = create<AudioState>((set, get) => {
         events.audioAppRemove.listen((e) => applyRemove(e.payload.appId)),
       ]);
 
-      listeners
-        .then(() => commands.getSnapshot())
-        .then((result) => {
-          if (result.status === "ok") set({ snapshot: result.data, error: null });
-          else set({ error: result.error.message });
-        });
+      void listeners.then(load);
 
       return () => {
         listeners.then((unlisten) => unlisten.forEach((fn) => fn()));
@@ -120,6 +126,7 @@ export const useAudioStore = create<AudioState>((set, get) => {
         () => applyApp(appId, { muted }),
         () => commands.setAppMute(appId, muted),
       ),
+    retry: load,
     clearError: () => {
       if (get().error) set({ error: null });
     },
