@@ -36,7 +36,7 @@ import { IconButton } from "@/components/IconButton";
 import { MainPageSkeleton } from "@/components/Skeleton";
 import { VolumeRow } from "@/components/VolumeRow";
 import { type DragState, type DropTarget, sameTarget, useAppDrag } from "@/hooks/use-app-drag";
-import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
+import { announceHeightAnimation, useFitWindowHeight } from "@/hooks/use-fit-window-height";
 import { type MenuItem, menuData, onMenuAction } from "@/lib/context-menu";
 import { closeAppDetails, closeAppDetailsOnPointerDown, toggleAppDetails } from "@/lib/app-details";
 import { cn } from "@/lib/utils";
@@ -419,6 +419,7 @@ function GroupItem({
   // 拖动组滑块时本地记下组音量，松手后才写入设置（设置每次保存都会写文件）。
   const [dragVolume, setDragVolume] = useState<number | null>(null);
   const groupVolume = dragVolume ?? group.volume;
+  const membersRef = useRef<HTMLDivElement>(null);
 
   return (
     <motion.li
@@ -489,28 +490,51 @@ function GroupItem({
         }}
         onMuteChange={(m) => setGroupMute(running.map((a) => a.appId), m)}
       />
-      {group.expanded && apps.length > 0 && (
-        <ul className="mt-1 flex flex-col gap-1 border-l border-border/70 pl-2">
-          <AnimatePresence initial={false} mode="popLayout">
-            {apps.map((app) => (
-              <AppItem
-                key={app.appId}
-                app={app}
-                alias={aliases.get(app.appId)}
-                renaming={renaming?.kind === "app" && renaming.id === app.appId}
-                onRenameDone={onRenameDone}
-                placement={{ kind: "group", group }}
-                groups={groups}
-                scrollAreaRef={scrollAreaRef}
-                dragging={drag?.appId === app.appId}
-                detailsDisabled={!!drag || renaming !== null}
-                onDragStart={(e) => onDragStart(app, e)}
-                onVolumeCommit={(v) => void setMemberVolume(group.id, app.appId, v)}
-              />
-            ))}
-          </AnimatePresence>
-        </ul>
-      )}
+      {/* 展开 / 折叠：高度从 0 到自然高度，下面的行随之平滑移动，不会与展开的内容重叠。 */}
+      <AnimatePresence initial={false}>
+        {group.expanded && apps.length > 0 && (
+          <motion.div
+            key="members"
+            ref={membersRef}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={LIST_TRANSITION}
+            onAnimationStart={(target) => {
+              // 按动画目标判断方向：折叠时退出动画用的是最后一次渲染的闭包，group.expanded 仍为 true。
+              // 从当前高度（中途反向时不为 0 或完整高度）变到 0，或变到完整高度 scrollHeight。
+              const el = membersRef.current;
+              if (!el) return;
+              const collapsing =
+                typeof target === "object" && "height" in target && target.height === 0;
+              const delta = collapsing ? -el.offsetHeight : el.scrollHeight - el.offsetHeight;
+              if (delta !== 0) announceHeightAnimation(delta, LIST_TRANSITION.duration * 1000);
+            }}
+            className="overflow-hidden"
+          >
+            <ul className="flex flex-col gap-1 border-l border-border/70 pt-1 pl-2">
+              <AnimatePresence initial={false} mode="popLayout">
+                {apps.map((app) => (
+                  <AppItem
+                    key={app.appId}
+                    app={app}
+                    alias={aliases.get(app.appId)}
+                    renaming={renaming?.kind === "app" && renaming.id === app.appId}
+                    onRenameDone={onRenameDone}
+                    placement={{ kind: "group", group }}
+                    groups={groups}
+                    scrollAreaRef={scrollAreaRef}
+                    dragging={drag?.appId === app.appId}
+                    detailsDisabled={!!drag || renaming !== null}
+                    onDragStart={(e) => onDragStart(app, e)}
+                    onVolumeCommit={(v) => void setMemberVolume(group.id, app.appId, v)}
+                  />
+                ))}
+              </AnimatePresence>
+            </ul>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.li>
   );
 }
