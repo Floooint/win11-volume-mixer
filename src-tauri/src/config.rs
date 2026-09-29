@@ -55,6 +55,31 @@ pub struct SavedApp {
     pub name: String,
 }
 
+/// 分组中的一个应用。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupMember {
+    pub app_id: String,
+    pub name: String,
+    /// 该应用在组音量 100% 时的音量（0–1）。实际音量 = 此值 × 组音量。
+    pub full_volume: f64,
+}
+
+/// 应用分组：组内应用在主界面合并为一行，由组音量按比例统一调节。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AppGroup {
+    /// 分组标识，创建时由前端生成，不随改名变化。
+    pub id: String,
+    pub name: String,
+    pub apps: Vec<GroupMember>,
+    /// 组音量（0–1）。组内应用的音量 = 该应用在组音量 100% 时的音量 × 组音量。
+    pub volume: f64,
+    /// 在主界面中展开显示组内应用。
+    #[serde(default)]
+    pub expanded: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -83,6 +108,8 @@ pub struct Settings {
     pub pinned_apps: Vec<SavedApp>,
     /// 隐藏的应用。
     pub hidden_apps: Vec<SavedApp>,
+    /// 应用分组，按显示顺序排列。一个应用只属于一个分组。
+    pub groups: Vec<AppGroup>,
 }
 
 impl Default for Settings {
@@ -101,6 +128,7 @@ impl Default for Settings {
             accent: None,
             pinned_apps: Vec::new(),
             hidden_apps: Vec::new(),
+            groups: Vec::new(),
         }
     }
 }
@@ -117,6 +145,7 @@ impl Settings {
         self.accent = self.accent.filter(|color| is_hex_color(color));
         self.pinned_apps = saved_apps(self.pinned_apps);
         self.hidden_apps = saved_apps(self.hidden_apps);
+        self.groups = normalized_groups(self.groups);
         self.window_width = self
             .window_width
             .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
@@ -130,6 +159,38 @@ fn saved_apps(apps: Vec<SavedApp>) -> Vec<SavedApp> {
     apps.into_iter()
         .filter(|app| !app.app_id.starts_with("pid:") && seen.insert(app.app_id.clone()))
         .collect()
+}
+
+/// 去掉重复的分组；一个应用只保留在它最先出现的分组中；组音量限制在 0–1。
+fn normalized_groups(groups: Vec<AppGroup>) -> Vec<AppGroup> {
+    let mut group_ids = std::collections::HashSet::new();
+    let mut app_ids = std::collections::HashSet::new();
+    groups
+        .into_iter()
+        .filter(|group| group_ids.insert(group.id.clone()))
+        .map(|mut group| {
+            group.apps = group
+                .apps
+                .into_iter()
+                .filter(|app| !app.app_id.starts_with("pid:") && app_ids.insert(app.app_id.clone()))
+                .map(|mut app| {
+                    app.full_volume = unit_or_full(app.full_volume);
+                    app
+                })
+                .collect();
+            group.volume = unit_or_full(group.volume);
+            group
+        })
+        .collect()
+}
+
+/// 限制在 0–1；无效值（NaN 等）按 1。
+fn unit_or_full(value: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
 }
 
 /// 是否为 `#RRGGBB` 格式，防止设置文件中的异常值被写进 CSS。
@@ -257,10 +318,11 @@ mod tests {
             accent: Some("#744DA9".into()),
             pinned_apps: Vec::new(),
             hidden_apps: Vec::new(),
+            groups: Vec::new(),
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[]}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[]}"##
         );
     }
 
@@ -309,6 +371,38 @@ mod tests {
             .map(|a| a.app_id.as_str())
             .collect();
         assert_eq!(ids, ["a", "b"]);
+    }
+
+    #[test]
+    fn 一个应用只属于一个分组且组音量被限制() {
+        let app = |id: &str| GroupMember {
+            app_id: id.into(),
+            name: id.into(),
+            full_volume: 1.5,
+        };
+        let group = |id: &str, apps: Vec<GroupMember>, volume: f64| AppGroup {
+            id: id.into(),
+            name: id.into(),
+            apps,
+            volume,
+            expanded: false,
+        };
+        let settings = Settings {
+            groups: vec![
+                group("g1", vec![app("a"), app("b")], 2.0),
+                group("g2", vec![app("b"), app("c")], f64::NAN),
+                group("g1", vec![app("d")], 0.5),
+            ],
+            ..Settings::default()
+        }
+        .normalized();
+        assert_eq!(settings.groups.len(), 2, "重复的分组标识只保留第一个");
+        let ids = |g: &AppGroup| g.apps.iter().map(|a| a.app_id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&settings.groups[0]), ["a", "b"]);
+        assert_eq!(ids(&settings.groups[1]), ["c"], "b 已在第一个分组中");
+        assert_eq!(settings.groups[0].volume, 1.0);
+        assert_eq!(settings.groups[1].volume, 1.0, "无效的组音量按 100%");
+        assert_eq!(settings.groups[0].apps[0].full_volume, 1.0);
     }
 
     #[test]

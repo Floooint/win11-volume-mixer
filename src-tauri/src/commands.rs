@@ -72,6 +72,33 @@ pub fn play_volume_feedback(config: State<'_, Config>, feedback: State<'_, Feedb
     }
 }
 
+/// 组音量：`apps` 为组内应用及其在组音量 100% 时的音量，按比例缩放后写入。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_group_volume(
+    audio: State<'_, AudioService>,
+    apps: Vec<(String, f32)>,
+    volume: f32,
+) -> AppResult<()> {
+    let volume = clamp(volume);
+    let apps = apps.into_iter().map(|(id, v)| (id, clamp(v))).collect();
+    audio
+        .request(|reply| Command::SetGroupVolume(apps, volume, reply))
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_group_mute(
+    audio: State<'_, AudioService>,
+    app_ids: Vec<String>,
+    muted: bool,
+) -> AppResult<()> {
+    audio
+        .request(|reply| Command::SetGroupMute(app_ids, muted, reply))
+        .await
+}
+
 /// 窗口所在显示器的刷新率（Hz），读取失败时为 `None`。设置页用它显示默认帧率。
 #[tauri::command]
 #[specta::specta]

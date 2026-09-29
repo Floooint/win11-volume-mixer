@@ -45,6 +45,14 @@ pub fn aggregate<'a>(sessions: impl IntoIterator<Item = SessionData<'a>>) -> Vec
     apps
 }
 
+/// 组音量按比例缩放：各应用的新音量 = 组音量 100% 时的音量 × 组音量。
+pub fn scaled_volumes(apps: &[(String, f32)], group_volume: f32) -> Vec<(&str, f32)> {
+    let group_volume = group_volume.clamp(0.0, 1.0);
+    apps.iter()
+        .map(|(app_id, full)| (app_id.as_str(), (full * group_volume).clamp(0.0, 1.0)))
+        .collect()
+}
+
 /// 新旧快照之间需要推送给前端的变化。
 #[derive(Debug, Default, PartialEq)]
 pub struct Diff {
@@ -138,6 +146,18 @@ mod tests {
         assert!(!app.volume.muted, "只有部分会话静音时不算静音");
         assert!(app.active, "任一会话活跃即活跃");
         assert_eq!(app.session_count, 2);
+    }
+
+    #[test]
+    fn 组音量按比例缩放组内应用() {
+        let apps = [("a".to_string(), 1.0), ("b".to_string(), 0.5)];
+        assert_eq!(scaled_volumes(&apps, 0.5), [("a", 0.5), ("b", 0.25)]);
+        assert_eq!(scaled_volumes(&apps, 1.0), [("a", 1.0), ("b", 0.5)]);
+        assert_eq!(
+            scaled_volumes(&apps, 2.0),
+            [("a", 1.0), ("b", 0.5)],
+            "超出范围按 100%"
+        );
     }
 
     #[test]

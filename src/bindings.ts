@@ -12,6 +12,9 @@ export const commands = {
 	setMasterMute: (muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_master_mute", { muted })),
 	setAppVolume: (appId: string, volume: number) => typedError<null, AppError>(__TAURI_INVOKE("set_app_volume", { appId, volume })),
 	setAppMute: (appId: string, muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_app_mute", { appId, muted })),
+	/**  组音量：`apps` 为组内应用及其在组音量 100% 时的音量，按比例缩放后写入。 */
+	setGroupVolume: (apps: ([string, number])[], volume: number) => typedError<null, AppError>(__TAURI_INVOKE("set_group_volume", { apps: apps.map(i=>i), volume })),
+	setGroupMute: (appIds: string[], muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_group_mute", { appIds, muted })),
 	/**  前端首次渲染完成。新建的窗口在此之后才显示，避免出现空白窗口。 */
 	windowReady: () => __TAURI_INVOKE<void>("window_ready"),
 	/**
@@ -23,11 +26,11 @@ export const commands = {
 	playVolumeFeedback: () => __TAURI_INVOKE<void>("play_volume_feedback"),
 	/**  窗口所在显示器的刷新率（Hz），读取失败时为 `None`。设置页用它显示默认帧率。 */
 	getRefreshRate: () => __TAURI_INVOKE<number | null>("get_refresh_rate"),
-	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings"),
+	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings").then((v) => (({...v,groups:v.groups.map(i=>({...i,apps:i.apps.map(i=>i)}))}) as typeof v)),
 	/**  各设置项的默认值。设置页据此判断是否显示“恢复默认”。 */
-	getDefaultSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_default_settings"),
+	getDefaultSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_default_settings").then((v) => (({...v,groups:v.groups.map(i=>({...i,apps:i.apps.map(i=>i)}))}) as typeof v)),
 	/**  保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。 */
-	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),
+	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings: ({...settings,groups:settings.groups?.map(i=>({...i,apps:i.apps.map(i=>i)}))}) })),
 	/**  设置页拖动宽度滑块时预览窗口宽度（逻辑像素），不写入设置；松手后由 `set_settings` 保存。 */
 	previewWindowWidth: (width: number) => __TAURI_INVOKE<void>("preview_window_width", { width }),
 	/**  是否开机自启（读取系统中的实际注册状态）。 */
@@ -82,6 +85,18 @@ export type AppError = {
 	message: string,
 };
 
+/**  应用分组：组内应用在主界面合并为一行，由组音量按比例统一调节。 */
+export type AppGroup = {
+	/**  分组标识，创建时由前端生成，不随改名变化。 */
+	id: string,
+	name: string,
+	apps: GroupMember[],
+	/**  组音量（0–1）。组内应用的音量 = 该应用在组音量 100% 时的音量 × 组音量。 */
+	volume: number,
+	/**  在主界面中展开显示组内应用。 */
+	expanded?: boolean,
+};
+
 /**  应用的最后一个会话退出。 */
 export type AppRemoveEvent = {
 	appId: string,
@@ -118,6 +133,14 @@ export type ErrorCode =
 "AudioThreadDown" | 
 /**  设置文件读写失败。 */
 "ConfigFailure";
+
+/**  分组中的一个应用。 */
+export type GroupMember = {
+	appId: string,
+	name: string,
+	/**  该应用在组音量 100% 时的音量（0–1）。实际音量 = 此值 × 组音量。 */
+	fullVolume: number,
+};
 
 /**  系统总音量被外部修改。 */
 export type MasterChangedEvent = VolumeState;
@@ -167,6 +190,8 @@ export type Settings_Deserialize = {
 	pinnedApps?: SavedApp[],
 	/**  隐藏的应用。 */
 	hiddenApps?: SavedApp[],
+	/**  应用分组，按显示顺序排列。一个应用只属于一个分组。 */
+	groups?: AppGroup[],
 };
 
 export type Settings_Serialize = {
@@ -197,6 +222,8 @@ export type Settings_Serialize = {
 	pinnedApps: SavedApp[],
 	/**  隐藏的应用。 */
 	hiddenApps: SavedApp[],
+	/**  应用分组，按显示顺序排列。一个应用只属于一个分组。 */
+	groups: AppGroup[],
 };
 
 /**  界面深浅色。 */

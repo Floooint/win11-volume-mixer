@@ -22,6 +22,12 @@ type AudioState = {
   setMasterMute: (muted: boolean) => void;
   setAppVolume: (appId: string, volume: number) => void;
   setAppMute: (appId: string, muted: boolean) => void;
+  /**
+   * 组音量：`apps` 为组内应用及其在组音量 100% 时的音量，按比例缩放后写入。
+   * 界面中组内应用的音量同时更新。
+   */
+  setGroupVolume: (apps: [string, number][], volume: number) => void;
+  setGroupMute: (appIds: string[], muted: boolean) => void;
   clearError: () => void;
 };
 
@@ -125,6 +131,16 @@ export const useAudioStore = create<AudioState>((set, get) => {
       run(
         () => applyApp(appId, { muted }),
         () => commands.setAppMute(appId, muted),
+      ),
+    setGroupVolume: (apps, volume) =>
+      run(
+        () => apps.forEach(([appId, full]) => applyApp(appId, { volume: full * volume })),
+        () => commands.setGroupVolume(apps, volume),
+      ),
+    setGroupMute: (appIds, muted) =>
+      run(
+        () => appIds.forEach((appId) => applyApp(appId, { muted })),
+        () => commands.setGroupMute(appIds, muted),
       ),
     retry: load,
     clearError: () => {

@@ -11,9 +11,10 @@ use serde::Deserialize;
 use tauri::{AppHandle, Manager, Runtime};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
-    ICoreWebView2, ICoreWebView2_11, ICoreWebView2ContextMenuItem,
-    ICoreWebView2ContextMenuItemCollection, ICoreWebView2ContextMenuRequestedEventArgs,
-    ICoreWebView2Controller, ICoreWebView2Environment, ICoreWebView2Environment9,
+    COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU, ICoreWebView2, ICoreWebView2_11,
+    ICoreWebView2ContextMenuItem, ICoreWebView2ContextMenuItemCollection,
+    ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Controller, ICoreWebView2Environment,
+    ICoreWebView2Environment9,
 };
 use webview2_com::{
     ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, ExecuteScriptCompletedHandler,
@@ -38,6 +39,8 @@ struct MenuEntry {
     /// 交给前端执行的动作标识。
     action: Option<String>,
     separator: bool,
+    /// 子菜单项，如“添加到分组”下的各个分组。
+    children: Option<Vec<MenuEntry>>,
 }
 
 /// 在 WebView 创建后调用一次。
@@ -146,8 +149,14 @@ fn add_frontend_items(
 fn clean_entries(entries: Vec<MenuEntry>) -> Vec<MenuEntry> {
     let mut result: Vec<MenuEntry> = Vec::new();
     for entry in entries {
+        let entry = MenuEntry {
+            children: entry.children.map(clean_entries),
+            ..entry
+        };
         let valid = if entry.separator {
             result.last().is_some_and(|last| !last.separator)
+        } else if let Some(children) = &entry.children {
+            !children.is_empty()
         } else {
             entry.action.is_some() || entry.value.as_deref().is_some_and(|v| !v.is_empty())
         };
@@ -176,13 +185,35 @@ fn insert_entries(
     if count > 0 {
         unsafe { items.InsertValueAtIndex(0, &separator(environment)?)? };
     }
-    for (index, entry) in entries.into_iter().enumerate() {
+    insert_at(items, 0, environment, webview, entries)
+}
+
+/// 从 `start` 开始依次插入菜单项，子菜单递归插入。
+fn insert_at(
+    items: &ICoreWebView2ContextMenuItemCollection,
+    start: u32,
+    environment: &ICoreWebView2Environment9,
+    webview: &ICoreWebView2,
+    entries: Vec<MenuEntry>,
+) -> windows_core::Result<()> {
+    for (index, mut entry) in entries.into_iter().enumerate() {
         let item = if entry.separator {
             separator(environment)?
+        } else if let Some(children) = entry.children.take() {
+            let submenu = unsafe {
+                environment.CreateContextMenuItem(
+                    &HSTRING::from(entry.label.as_str()),
+                    None,
+                    COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU,
+                )?
+            };
+            let sub_items = unsafe { submenu.Children()? };
+            insert_at(&sub_items, 0, environment, webview, children)?;
+            submenu
         } else {
             command(environment, webview, entry)?
         };
-        unsafe { items.InsertValueAtIndex(index as u32, &item)? };
+        unsafe { items.InsertValueAtIndex(start + index as u32, &item)? };
     }
     Ok(())
 }
@@ -285,5 +316,18 @@ mod tests {
             })
             .collect();
         assert_eq!(labels, ["复制", "-", "置顶"]);
+    }
+
+    #[test]
+    fn 空的子菜单被去掉() {
+        let parsed: Vec<MenuEntry> = serde_json::from_str(
+            r#"[{"label":"添加到分组","children":[{"separator":true}]},
+                {"label":"移到分组","children":[{"label":"游戏","action":"group:g1"}]}]"#,
+        )
+        .unwrap();
+        let cleaned = clean_entries(parsed);
+        assert_eq!(cleaned.len(), 1);
+        assert_eq!(cleaned[0].label, "移到分组");
+        assert_eq!(cleaned[0].children.as_ref().map(Vec::len), Some(1));
     }
 }

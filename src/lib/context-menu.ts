@@ -11,6 +11,8 @@ export type MenuItem =
   | { label: string; value: string }
   /** 点击后执行动作，如 `pin:<appId>`。 */
   | { label: string; action: string }
+  /** 子菜单，如“添加到分组”。 */
+  | { label: string; children: MenuItem[] }
   | { separator: true };
 
 declare global {

@@ -258,6 +258,21 @@ impl State {
                 let result = self.for_app_sessions(&app_id, |s| s.set_volume(volume));
                 self.reply_after_set(reply, result);
             }
+            Command::SetGroupVolume(apps, volume, reply) => {
+                // 组内应用可能刚好退出，只要有一个成功就算成功。
+                let results: Vec<_> = aggregate::scaled_volumes(&apps, volume)
+                    .into_iter()
+                    .map(|(app_id, v)| self.for_app_sessions(app_id, |s| s.set_volume(v)))
+                    .collect();
+                self.reply_after_set(reply, any_ok(results));
+            }
+            Command::SetGroupMute(app_ids, muted, reply) => {
+                let results: Vec<_> = app_ids
+                    .iter()
+                    .map(|app_id| self.for_app_sessions(app_id, |s| s.set_mute(muted)))
+                    .collect();
+                self.reply_after_set(reply, any_ok(results));
+            }
             Command::SetAppMute(app_id, muted, reply) => {
                 let result = self.for_app_sessions(&app_id, |s| s.set_mute(muted));
                 self.reply_after_set(reply, result);
@@ -455,10 +470,20 @@ impl Drop for State {
     }
 }
 
+/// 一组操作中只要有一个成功就算成功；全部失败时返回第一个错误。
+fn any_ok(results: Vec<AppResult<()>>) -> AppResult<()> {
+    if results.iter().any(Result::is_ok) || results.is_empty() {
+        return Ok(());
+    }
+    results.into_iter().next().unwrap_or(Ok(()))
+}
+
 #[derive(PartialEq, Eq, Hash)]
 enum VolumeTarget {
     Master,
     App(String),
+    /// 以组内应用标识区分不同的组。
+    Group(Vec<String>),
 }
 
 /// 同一批消息中，同一目标的音量请求只执行最后一个，其余直接回复成功。
@@ -467,6 +492,9 @@ fn coalesce_requests(batch: Vec<Msg>) -> Vec<Msg> {
     let target = |msg: &Msg| match msg {
         Msg::Command(Command::SetMasterVolume(..)) => Some(VolumeTarget::Master),
         Msg::Command(Command::SetAppVolume(app_id, ..)) => Some(VolumeTarget::App(app_id.clone())),
+        Msg::Command(Command::SetGroupVolume(apps, ..)) => Some(VolumeTarget::Group(
+            apps.iter().map(|(app_id, _)| app_id.clone()).collect(),
+        )),
         _ => None,
     };
 
@@ -483,7 +511,9 @@ fn coalesce_requests(batch: Vec<Msg>) -> Vec<Msg> {
         .filter_map(|(i, msg)| match target(&msg) {
             Some(t) if last_index[&t] != i => {
                 if let Msg::Command(
-                    Command::SetMasterVolume(_, reply) | Command::SetAppVolume(_, _, reply),
+                    Command::SetMasterVolume(_, reply)
+                    | Command::SetAppVolume(_, _, reply)
+                    | Command::SetGroupVolume(_, _, reply),
                 ) = msg
                 {
                     let _ = reply.send(Ok(()));

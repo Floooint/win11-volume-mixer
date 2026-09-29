@@ -31,6 +31,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_master_mute,
             commands::set_app_volume,
             commands::set_app_mute,
+            commands::set_group_volume,
+            commands::set_group_mute,
             commands::window_ready,
             commands::fit_window_height,
             commands::play_volume_feedback,
@@ -56,13 +58,28 @@ fn specta_builder() -> Builder<tauri::Wry> {
 
 /// 生成 `src/bindings.ts`。debug 构建启动时自动执行，也可通过 `cargo test` 触发。
 pub fn export_bindings() {
+    const PATH: &str = "../src/bindings.ts";
     specta_builder()
         .export(
             specta_typescript::Typescript::default()
                 .header("// 此文件由 tauri-specta 自动生成，请勿手动修改。"),
-            "../src/bindings.ts",
+            PATH,
         )
         .expect("导出 TypeScript 绑定失败");
+    fix_optional_array_transforms(PATH);
+}
+
+/// 开启无损浮点后，tauri-specta 会为含数字的嵌套数组生成 `x.groups.map(...)` 这样的转换代码，
+/// 但设置结构体带 `#[serde(default)]`，这些字段在前端是可选的，直接调用 `.map` 无法通过类型检查。
+/// 这些转换只是原样复制（`i=>i`），改为可选链调用即可，运行结果不变。
+fn fix_optional_array_transforms(path: &str) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let fixed = text.replace("settings.groups.map(", "settings.groups?.map(");
+    if fixed != text {
+        let _ = std::fs::write(path, fixed);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -51,6 +51,10 @@ pub enum Command {
     ToggleMasterMute(Reply<()>),
     SetAppVolume(String, f32, Reply<()>),
     SetAppMute(String, bool, Reply<()>),
+    /// 组音量：按比例缩放组内应用。参数为组内应用、各应用在组音量 100% 时的音量、新的组音量。
+    SetGroupVolume(Vec<(String, f32)>, f32, Reply<()>),
+    /// 组静音：组内所有应用一起静音或取消静音。
+    SetGroupMute(Vec<String>, bool, Reply<()>),
     Shutdown,
 }
 
