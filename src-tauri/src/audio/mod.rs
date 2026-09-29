@@ -76,6 +76,10 @@ pub enum Msg {
         session_id: String,
     },
     DefaultDeviceChanged,
+    /// 某个设备在系统设置中被改名。
+    DeviceRenamed {
+        device_id: String,
+    },
 }
 
 /// 读取由 COM 分配的字符串并释放内存。

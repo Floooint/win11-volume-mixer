@@ -28,15 +28,22 @@ impl TrackedSession {
         tx: &Sender<Msg>,
     ) -> Result<Self> {
         let volume: ISimpleAudioVolume = control.cast()?;
-        let state = unsafe { control.GetState()? };
         let app = app_info::resolve(&control);
 
+        // 先注册回调再读取状态：反过来的话，两步之间的状态变化（开始播放、过期）会丢失。
         let events: IAudioSessionEvents = SessionEvents {
             session_id,
             tx: tx.clone(),
         }
         .into();
         unsafe { control.RegisterAudioSessionNotification(&events)? };
+        let state = match unsafe { control.GetState() } {
+            Ok(state) => state,
+            Err(e) => {
+                let _ = unsafe { control.UnregisterAudioSessionNotification(&events) };
+                return Err(e);
+            }
+        };
 
         Ok(Self {
             app,

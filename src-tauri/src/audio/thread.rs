@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::oneshot;
 use windows::Win32::Media::Audio::{
-    AudioSessionStateExpired, IAudioSessionControl2, IAudioSessionNotification,
-    IMMDeviceEnumerator, IMMNotificationClient, MMDeviceEnumerator,
+    AudioSessionStateExpired, IAudioSessionControl2, IAudioSessionEnumerator,
+    IAudioSessionNotification, IMMDeviceEnumerator, IMMNotificationClient, MMDeviceEnumerator,
 };
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
@@ -211,7 +211,10 @@ impl State {
                 self.sessions.remove(&session_id);
                 self.mark_dirty(false);
             }
-            Msg::DefaultDeviceChanged => {
+            // 只有当前设备改名时才需要重建（列表和托盘显示设备名）。
+            Msg::DeviceRenamed { device_id }
+                if self.device.as_ref().is_none_or(|d| d.id != device_id) => {}
+            Msg::DefaultDeviceChanged | Msg::DeviceRenamed { .. } => {
                 self.close_device();
                 let result = self.open_device();
                 self.log_err(result);
@@ -232,11 +235,19 @@ impl State {
             }
             Command::SetMasterVolume(volume, reply) => {
                 let result = self.device().and_then(|d| Ok(d.set_master_volume(volume)?));
-                self.reply_after_set(reply, result);
+                self.reply_after_set(reply, result, |last| {
+                    if let Some(device) = &mut last.device {
+                        device.master.volume = volume;
+                    }
+                });
             }
             Command::SetMasterMute(muted, reply) => {
                 let result = self.device().and_then(|d| Ok(d.set_master_mute(muted)?));
-                self.reply_after_set(reply, result);
+                self.reply_after_set(reply, result, |last| {
+                    if let Some(device) = &mut last.device {
+                        device.master.muted = muted;
+                    }
+                });
             }
             // 这两个请求不是由前端发起的，前端不知道新值，因此按外部变化推送。
             Command::AdjustMasterVolume(delta, reply) => {
@@ -256,36 +267,55 @@ impl State {
             }
             Command::SetAppVolume(app_id, volume, reply) => {
                 let result = self.for_app_sessions(&app_id, |s| s.set_volume(volume));
-                self.reply_after_set(reply, result);
+                self.reply_after_set(reply, result, |last| {
+                    patch_app(last, &app_id, |v| v.volume = volume);
+                });
             }
             Command::SetGroupVolume(apps, volume, reply) => {
                 // 组内应用可能刚好退出，只要有一个成功就算成功。
-                let results: Vec<_> = aggregate::scaled_volumes(&apps, volume)
-                    .into_iter()
-                    .map(|(app_id, v)| self.for_app_sessions(app_id, |s| s.set_volume(v)))
+                let scaled = aggregate::scaled_volumes(&apps, volume);
+                let results: Vec<_> = scaled
+                    .iter()
+                    .map(|&(app_id, v)| self.for_app_sessions(app_id, |s| s.set_volume(v)))
                     .collect();
-                self.reply_after_set(reply, any_ok(results));
+                self.reply_after_set(reply, any_ok(results), |last| {
+                    for &(app_id, volume) in &scaled {
+                        patch_app(last, app_id, |v| v.volume = volume);
+                    }
+                });
             }
             Command::SetGroupMute(app_ids, muted, reply) => {
                 let results: Vec<_> = app_ids
                     .iter()
                     .map(|app_id| self.for_app_sessions(app_id, |s| s.set_mute(muted)))
                     .collect();
-                self.reply_after_set(reply, any_ok(results));
+                self.reply_after_set(reply, any_ok(results), |last| {
+                    for app_id in &app_ids {
+                        patch_app(last, app_id, |v| v.muted = muted);
+                    }
+                });
             }
             Command::SetAppMute(app_id, muted, reply) => {
                 let result = self.for_app_sessions(&app_id, |s| s.set_mute(muted));
-                self.reply_after_set(reply, result);
+                self.reply_after_set(reply, result, |last| {
+                    patch_app(last, &app_id, |v| v.muted = muted);
+                });
             }
             Command::Shutdown => unreachable!("在 handle 中处理"),
         }
     }
 
-    /// 自身修改成功后静默同步基准状态，这样它不会出现在下一次差异中。
-    /// 若已有外部变化待推送，则不同步，交给 flush 一并推送。
-    fn reply_after_set(&mut self, reply: Reply<()>, result: AppResult<()>) {
-        if result.is_ok() && self.pending.deadline.is_none() {
-            self.last = self.snapshot();
+    /// 自身修改成功后，把写入的值同步到基准状态（`patch`），这样它不会出现在下一次差异中。
+    /// 只改写入的目标，不重读整份状态：重读会把还没收到通知的外部变化也记为基准，
+    /// 通知到达后差异为空，这些变化就再也不会推送给前端。
+    fn reply_after_set(
+        &mut self,
+        reply: Reply<()>,
+        result: AppResult<()>,
+        patch: impl FnOnce(&mut AudioSnapshot),
+    ) {
+        if result.is_ok() {
+            patch(&mut self.last);
         }
         let _ = reply.send(result);
     }
@@ -413,11 +443,15 @@ impl State {
 
         let mut seen = HashSet::new();
         for i in 0..count {
-            let control: IAudioSessionControl2 = unsafe { list.GetSession(i)? }.cast()?;
-            if unsafe { control.GetState()? } == AudioSessionStateExpired {
-                continue;
-            }
-            let id = session::instance_id(&control)?;
+            // 单个会话读取失败（通常是刚好退出）只跳过它，不影响其他会话的跟踪和清理。
+            let (control, id) = match read_session(&list, i) {
+                Ok(Some(session)) => session,
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!("[audio] 读取会话失败：{e}");
+                    continue;
+                }
+            };
             seen.insert(id.clone());
             if self.sessions.contains_key(&id) {
                 continue;
@@ -438,19 +472,20 @@ impl State {
         app_id: &str,
         action: impl Fn(&TrackedSession) -> windows_core::Result<()>,
     ) -> AppResult<()> {
-        let mut matched = false;
-        for session in self.sessions.values().filter(|s| s.app.app_id == app_id) {
-            action(session)?;
-            matched = true;
-        }
-        if matched {
-            Ok(())
-        } else {
-            Err(AppError::new(
+        // 某个会话失败（如刚好失效）不影响同一应用的其他会话，有一个成功就算成功。
+        let results: Vec<AppResult<()>> = self
+            .sessions
+            .values()
+            .filter(|s| s.app.app_id == app_id)
+            .map(|session| Ok(action(session)?))
+            .collect();
+        if results.is_empty() {
+            return Err(AppError::new(
                 ErrorCode::AppNotFound,
                 "该应用已没有音频会话",
-            ))
+            ));
         }
+        any_ok(results)
     }
 
     fn log_err(&self, result: windows_core::Result<()>) {
@@ -472,10 +507,30 @@ impl Drop for State {
 
 /// 一组操作中只要有一个成功就算成功；全部失败时返回第一个错误。
 fn any_ok(results: Vec<AppResult<()>>) -> AppResult<()> {
-    if results.iter().any(Result::is_ok) || results.is_empty() {
+    if results.iter().any(Result::is_ok) {
         return Ok(());
     }
     results.into_iter().next().unwrap_or(Ok(()))
+}
+
+/// 修改基准状态中某个应用的音量状态。
+fn patch_app(last: &mut AudioSnapshot, app_id: &str, patch: impl FnOnce(&mut VolumeState)) {
+    if let Some(app) = last.apps.iter_mut().find(|a| a.app_id == app_id) {
+        patch(&mut app.volume);
+    }
+}
+
+/// 读取第 `i` 个会话及其实例标识；已过期的会话返回 `None`。
+fn read_session(
+    list: &IAudioSessionEnumerator,
+    i: i32,
+) -> windows_core::Result<Option<(IAudioSessionControl2, String)>> {
+    let control: IAudioSessionControl2 = unsafe { list.GetSession(i)? }.cast()?;
+    if unsafe { control.GetState()? } == AudioSessionStateExpired {
+        return Ok(None);
+    }
+    let id = session::instance_id(&control)?;
+    Ok(Some((control, id)))
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -499,15 +554,28 @@ fn coalesce_requests(batch: Vec<Msg>) -> Vec<Msg> {
     };
 
     let mut last_index = HashMap::new();
+    let mut last_rebuild = None;
+    let mut last_refresh = None;
     for (i, msg) in batch.iter().enumerate() {
         if let Some(target) = target(msg) {
             last_index.insert(target, i);
+        }
+        match msg {
+            Msg::DefaultDeviceChanged => last_rebuild = Some(i),
+            Msg::SessionCreated => last_refresh = Some(i),
+            _ => {}
         }
     }
 
     batch
         .into_iter()
         .enumerate()
+        // 重建设备和重新枚举会话都读取完整状态，同一批中只需执行最后一次。
+        .filter(|(i, msg)| match msg {
+            Msg::DefaultDeviceChanged => last_rebuild == Some(*i),
+            Msg::SessionCreated => last_refresh == Some(*i),
+            _ => true,
+        })
         .filter_map(|(i, msg)| match target(&msg) {
             Some(t) if last_index[&t] != i => {
                 if let Msg::Command(
@@ -565,5 +633,21 @@ mod tests {
         // 被丢弃的请求也要收到回复，否则前端的 Promise 永远不会结束。
         assert!(matches!(r1.try_recv(), Ok(Ok(()))));
         assert!(matches!(r2.try_recv(), Ok(Ok(()))));
+    }
+
+    #[test]
+    fn 同一批中设备重建和会话枚举只执行最后一次() {
+        let batch = vec![
+            Msg::DefaultDeviceChanged,
+            Msg::SessionCreated,
+            Msg::MasterChanged { is_self: false },
+            Msg::DefaultDeviceChanged,
+            Msg::SessionCreated,
+        ];
+        let kept = coalesce_requests(batch);
+        assert_eq!(kept.len(), 3);
+        assert!(matches!(kept[0], Msg::MasterChanged { is_self: false }));
+        assert!(matches!(kept[1], Msg::DefaultDeviceChanged));
+        assert!(matches!(kept[2], Msg::SessionCreated));
     }
 }
