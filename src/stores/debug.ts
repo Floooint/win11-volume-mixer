@@ -50,6 +50,8 @@ export const useDebugStore = create<DebugState>((set) => {
             ? `${name} ${Math.ceil(counter / SAMPLE_NAMES.length)}`
             : name,
         icon: null,
+        processName: null,
+        exePath: null,
         volume: { volume: Math.round(Math.random() * 100) / 100, muted: false },
         // 交替出现活跃 / 不活跃，便于对比两种样式。
         active: counter % 2 === 1,

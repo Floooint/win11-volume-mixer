@@ -25,6 +25,10 @@ pub struct AppInfo {
     pub name: String,
     /// Shell 解析名（exe 路径或 `shell:AppsFolder\<AUMID>`），由 `icon` 模块提取图标。
     pub icon: Option<String>,
+    /// 进程的 exe 文件名，如 `chrome.exe`。
+    pub process_name: Option<String>,
+    /// exe 完整路径。打不开进程时为 `None`。
+    pub exe_path: Option<String>,
 }
 
 pub fn resolve(control: &IAudioSessionControl2) -> AppInfo {
@@ -33,6 +37,8 @@ pub fn resolve(control: &IAudioSessionControl2) -> AppInfo {
             app_id: "system".into(),
             name: "系统声音".into(),
             icon: system_sounds_icon(),
+            process_name: None,
+            exe_path: None,
         };
     }
 
@@ -49,13 +55,18 @@ pub fn resolve(control: &IAudioSessionControl2) -> AppInfo {
 fn from_process(pid: u32, display_name: Option<String>) -> AppInfo {
     // 打不开进程时（受保护进程，如带反作弊的游戏）按 PID 区分，名称依次回退为
     // 会话显示名、进程快照中的 exe 名、“未知应用”。
-    let unknown = || AppInfo {
-        app_id: format!("pid:{pid}"),
-        name: display_name
-            .clone()
-            .or_else(|| snapshot_exe_name(pid).map(|exe| file_stem(&exe)))
-            .unwrap_or_else(|| format!("未知应用（PID {pid}）")),
-        icon: None,
+    let unknown = || {
+        let exe = snapshot_exe_name(pid);
+        AppInfo {
+            app_id: format!("pid:{pid}"),
+            name: display_name
+                .clone()
+                .or_else(|| exe.as_deref().map(file_stem))
+                .unwrap_or_else(|| format!("未知应用（PID {pid}）")),
+            icon: None,
+            process_name: exe,
+            exe_path: None,
+        }
     };
 
     // 管理员权限进程等情况下会失败，按 PID 回退。
@@ -76,9 +87,18 @@ fn from_process(pid: u32, display_name: Option<String>) -> AppInfo {
         .unwrap_or_else(|| file_stem(&path));
     let app_id = family_name.unwrap_or_else(|| path.to_lowercase());
     // 打包应用的 exe 往往没有图标或只是通用图标，改用开始菜单中的应用磁贴图标。
-    let icon = Some(aumid.map_or(path, |id| format!(r"shell:AppsFolder\{id}")));
+    let icon = Some(aumid.map_or_else(|| path.clone(), |id| format!(r"shell:AppsFolder\{id}")));
+    let process_name = Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned());
 
-    AppInfo { app_id, name, icon }
+    AppInfo {
+        app_id,
+        name,
+        icon,
+        process_name,
+        exe_path: Some(path),
+    }
 }
 
 fn image_path(process: HANDLE) -> Option<String> {
@@ -214,6 +234,7 @@ mod tests {
         assert_eq!(info.app_id, "pid:4");
         assert_eq!(info.name, "System");
         assert_eq!(info.icon, None);
+        assert_eq!(info.process_name.as_deref(), Some("System"));
     }
 
     #[test]

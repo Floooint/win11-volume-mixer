@@ -28,6 +28,10 @@ pub struct AppAudio {
     /// 图标来源，前端通过 `appicon` 协议加载（`convertFileSrc(icon, "appicon")`）。
     /// 无法确定来源时（如管理员权限进程）为 `None`，前端显示首字母占位。
     pub icon: Option<String>,
+    /// 进程的 exe 文件名，右键菜单“复制进程名”使用。系统声音为 `None`。
+    pub process_name: Option<String>,
+    /// exe 完整路径，右键菜单“复制路径”使用。打不开进程时为 `None`。
+    pub exe_path: Option<String>,
     pub volume: VolumeState,
     /// 是否有会话正在播放。
     pub active: bool,

@@ -226,7 +226,10 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .additional_browser_args(&browser_args(hardware_acceleration))
         .build()?;
     disable_system_transitions(&window);
-    let _ = window.with_webview(|webview| crate::context_menu::install(&webview.controller()));
+    let handle = app.clone();
+    let _ = window.with_webview(move |webview| {
+        crate::context_menu::install(&handle, &webview.controller(), &webview.environment())
+    });
     Ok(window)
 }
 

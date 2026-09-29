@@ -49,6 +49,10 @@ export type AppAudio = {
 	 *  无法确定来源时（如管理员权限进程）为 `None`，前端显示首字母占位。
 	 */
 	icon: string | null,
+	/**  进程的 exe 文件名，右键菜单“复制进程名”使用。系统声音为 `None`。 */
+	processName: string | null,
+	/**  exe 完整路径，右键菜单“复制路径”使用。打不开进程时为 `None`。 */
+	exePath: string | null,
 	volume: VolumeState,
 	/**  是否有会话正在播放。 */
 	active: boolean,

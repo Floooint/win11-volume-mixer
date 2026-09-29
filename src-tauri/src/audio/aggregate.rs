@@ -20,6 +20,8 @@ pub fn aggregate<'a>(sessions: impl IntoIterator<Item = SessionData<'a>>) -> Vec
             app_id: session.app.app_id.clone(),
             name: session.app.name.clone(),
             icon: session.app.icon.clone(),
+            process_name: session.app.process_name.clone(),
+            exe_path: session.app.exe_path.clone(),
             volume: VolumeState {
                 volume: 0.0,
                 muted: true,
@@ -106,6 +108,8 @@ mod tests {
             app_id: app_id.into(),
             name: name.into(),
             icon: None,
+            process_name: None,
+            exe_path: None,
         }
     }
 

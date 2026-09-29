@@ -17,6 +17,7 @@ import { IconButton } from "@/components/IconButton";
 import { MainPageSkeleton, Skeleton } from "@/components/Skeleton";
 import { VolumeRow } from "@/components/VolumeRow";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
+import { copyData } from "@/lib/context-copy";
 import { cn } from "@/lib/utils";
 import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
@@ -124,6 +125,11 @@ function AppItem({
 
   return (
     <li
+      data-copy={copyData([
+        { label: "应用名", value: app.name },
+        app.processName && { label: "进程名", value: app.processName },
+        app.exePath && { label: "路径", value: app.exePath },
+      ])}
       className={cn(
         "rounded-lg px-2 py-2 transition-colors",
         // 正在发声：浅色底，一眼就能找到。
@@ -177,7 +183,10 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   const device = snapshot?.device;
   const masterSection = device && (
-    <section className="mx-3 rounded-xl border border-border bg-card px-3 py-3">
+    <section
+      data-copy={copyData([{ label: "设备名", value: device.name }])}
+      className="mx-3 rounded-xl border border-border bg-card px-3 py-3"
+    >
       <VolumeRow
         name="系统音量"
         detail={device.name}

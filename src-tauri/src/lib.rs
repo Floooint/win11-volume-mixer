@@ -1,5 +1,6 @@
 mod animation;
 mod audio;
+mod clipboard;
 mod commands;
 mod config;
 mod context_menu;
