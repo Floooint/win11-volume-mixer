@@ -172,6 +172,8 @@ export function VolumeSlider({
       step={1}
       value={[Math.round(local * 100)]}
       aria-label={label}
+      // 只有拖柄带 role="slider"，点在轨道上时也不应切换应用详情（见 src/lib/app-details.ts）。
+      data-no-details
       onPointerDown={(e) => {
         if (ignoreNonPrimary(e)) return;
         adjusting.current = true;

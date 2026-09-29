@@ -167,7 +167,9 @@ export function VolumeRow({
           </div>
         </div>
         {detail && <p className="truncate text-xs text-muted-foreground">{detail}</p>}
+        {/* 静音按钮和滑块一行用于调节音量：点在这里（包括轨道、按钮之间的空隙）不切换应用详情。 */}
         <div
+          data-no-details
           className={cn(
             "mt-1 flex items-center gap-1 transition-opacity",
             inactive && "opacity-60",

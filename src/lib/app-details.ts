@@ -4,7 +4,7 @@
  */
 import { type AppDetails, commands } from "@/bindings";
 
-/** 应用行上的这些控件有自己的点击操作，点击它们不切换详情。 */
+/** 应用行上的这些控件有自己的点击操作，点击它们不切换详情。音量滑块整行标记了 `data-no-details`。 */
 const CONTROLS = "button, input, textarea, a, [role='slider'], [data-no-details]";
 
 /** 点击位置是应用行上切换详情的区域（行内空白、名称、图标等），返回所在的应用行。 */
