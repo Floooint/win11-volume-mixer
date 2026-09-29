@@ -1,16 +1,35 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { commands, type WindowPolicy_Serialize as WindowPolicy } from "@/bindings";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
 import { IconButton } from "@/components/IconButton";
+import {
+  NumberInput,
+  Select,
+  type SelectOption,
+  SettingRow,
+  Slider,
+  Switch,
+} from "@/components/SettingControls";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
-import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/stores/settings";
 
-const MODES: { value: WindowPolicy; label: string; hint: string }[] = [
+const MODES: (SelectOption<WindowPolicy> & { hint: string })[] = [
   { value: "smart", label: "智能", hint: "隐藏一段时间后释放界面，兼顾速度与内存" },
   { value: "resident", label: "常驻", hint: "界面始终保留，打开最快，后台内存较高" },
   { value: "silent", label: "静默", hint: "隐藏即释放界面，内存最低，打开约慢 0.5 秒" },
 ];
+
+/** 运行模式的说明：总述加每种模式一行。 */
+const MODES_HELP = (
+  <>
+    <p>窗口隐藏后如何处理界面：</p>
+    {MODES.map((mode) => (
+      <p key={mode.value}>
+        <span className="font-medium">{mode.label}</span>：{mode.hint}
+      </p>
+    ))}
+  </>
+);
 
 /** 与后端 `SMART_SECONDS_RANGE` 保持一致。 */
 const MIN_SECONDS = 10;
@@ -20,112 +39,66 @@ const MAX_SECONDS = 600;
 const MIN_FPS = 30;
 const MAX_FPS = 240;
 
+/** 与后端 `config::WIDTH_RANGE` 保持一致。 */
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 500;
+const WIDTH_STEP = 10;
+
 /**
- * 整数输入框。输入过程中允许临时的非法值，失焦或回车时再修正到范围内并保存。
- * `optional` 时允许清空：清空表示使用默认值（`placeholder` 显示默认值）。
+ * 窗口宽度：拖动时实时预览（不保存），松手后保存。
+ * 键盘调节同样先预览，按键松开时 Radix 触发 `onValueCommit` 保存。
  */
-function NumberInput({
+function WidthSetting({
   value,
-  min,
-  max,
-  step,
-  label,
-  placeholder,
-  optional = false,
+  defaultValue,
   onCommit,
 }: {
-  value: number | null;
-  min: number;
-  max: number;
-  step: number;
-  label: string;
-  placeholder?: string;
-  optional?: boolean;
-  onCommit: (value: number | null) => void;
+  value: number;
+  defaultValue: number | undefined;
+  onCommit: (width: number) => void;
 }) {
-  const text = (v: number | null) => (v === null ? "" : String(v));
-  const [draft, setDraft] = useState(text(value));
-  useEffect(() => setDraft(text(value)), [value]);
-
-  const commit = () => {
-    let next: number | null;
-    if (draft.trim() === "" && optional) {
-      next = null;
-    } else {
-      const parsed = Number(draft);
-      next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : value;
-    }
-    setDraft(text(next));
-    if (next !== value) onCommit(next);
-  };
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
 
   return (
-    <input
-      type="number"
-      inputMode="numeric"
-      aria-label={label}
-      min={min}
-      max={max}
-      step={step}
-      value={draft}
-      placeholder={placeholder}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-      className="w-20 rounded-md border border-input bg-background px-2 py-1 text-right text-foreground placeholder:text-muted-foreground"
-    />
-  );
-}
-
-/** Win11 风格开关。 */
-function Switch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative inline-flex h-5 w-10 shrink-0 items-center rounded-full border transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        checked ? "border-primary bg-primary" : "border-muted-foreground/60 bg-transparent",
-      )}
+    <SettingRow
+      title="窗口宽度"
+      isDefault={defaultValue === undefined || draft === defaultValue}
+      onReset={() => defaultValue !== undefined && onCommit(defaultValue)}
+      below={
+        <Slider
+          label="窗口宽度"
+          value={draft}
+          min={MIN_WIDTH}
+          max={MAX_WIDTH}
+          step={WIDTH_STEP}
+          onChange={(width) => {
+            setDraft(width);
+            void commands.previewWindowWidth(width);
+          }}
+          onCommit={onCommit}
+        />
+      }
     >
-      <span
-        className={cn(
-          "absolute size-3 rounded-full transition-all duration-150 ease-out",
-          checked ? "left-5.5 bg-primary-foreground" : "left-0.75 bg-muted-foreground",
-        )}
-      />
-    </button>
+      <span className="text-xs tabular-nums text-muted-foreground">{draft} px</span>
+    </SettingRow>
   );
 }
 
-/** 一项带开关的设置。 */
-function SwitchRow({
-  title,
-  hint,
-  checked,
-  onChange,
-}: {
-  title: string;
-  hint: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span>
-        <span className="block font-medium">{title}</span>
-        <span className="block text-xs text-muted-foreground">{hint}</span>
-      </span>
-      <Switch checked={checked} onChange={onChange} />
-    </div>
+    <section>
+      <h2 className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">{title}</h2>
+      <div className="mr-1 ml-3 flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
+        {children}
+      </div>
+    </section>
   );
 }
 
 export function SettingsPage({ onBack }: { onBack: () => void }) {
   const settings = useSettingsStore((s) => s.settings);
+  const defaults = useSettingsStore((s) => s.defaults);
   const error = useSettingsStore((s) => s.error);
   const save = useSettingsStore((s) => s.save);
   const [refreshRate, setRefreshRate] = useState<number | null>(null);
@@ -138,106 +111,148 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const contentRef = useRef<HTMLDivElement>(null);
   useFitWindowHeight(rootRef, scrollRef, contentRef);
 
+  /** 某项是否为默认值；默认值尚未读取时视为默认，不显示“恢复默认”。 */
+  const isDefault = <K extends keyof NonNullable<typeof settings>>(key: K) =>
+    !settings || !defaults || settings[key] === defaults[key];
+  const reset = <K extends keyof NonNullable<typeof settings>>(key: K) =>
+    defaults && save({ [key]: defaults[key] });
+
   return (
     <div ref={rootRef} className="flex h-full flex-col">
-      <header className="flex items-center gap-1 px-2 pt-3 pb-2">
+      <header className="flex items-center gap-1 px-2 pt-3 pb-1">
         <IconButton label="返回" onClick={onBack}>
           <ArrowLeft size={16} />
         </IconButton>
         <h1 className="text-sm font-semibold">设置</h1>
       </header>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="scroll-area min-h-0 flex-1 overflow-y-auto">
         <div ref={contentRef} className="pb-3">
           {settings && (
-            <section className="mx-3 rounded-xl border border-border bg-card p-3">
-              <p className="font-medium">运行模式</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">窗口隐藏后如何处理界面</p>
-              <div className="mt-3 flex flex-col gap-2" role="radiogroup" aria-label="运行模式">
-                {MODES.map((mode) => {
-                  const selected = settings.windowPolicy === mode.value;
-                  return (
-                    <button
-                      key={mode.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => save({ windowPolicy: mode.value })}
-                      className={`rounded-md border px-3 py-2 text-left ${
-                        selected ? "border-primary bg-primary/10" : "border-border hover:bg-accent"
-                      }`}
-                    >
-                      <div className="font-medium">{mode.label}</div>
-                      <div className="text-xs text-muted-foreground">{mode.hint}</div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {settings.windowPolicy === "smart" && (
-                <label className="mt-3 flex items-center justify-between gap-2 text-sm">
-                  <span>
-                    释放等待时间
-                    <span className="block text-xs text-muted-foreground">
-                      {MIN_SECONDS}–{MAX_SECONDS} 秒
+            <>
+              <Section title="运行">
+                <SettingRow
+                  title="运行模式"
+                  help={MODES_HELP}
+                  isDefault={isDefault("windowPolicy")}
+                  onReset={() => reset("windowPolicy")}
+                >
+                  <Select
+                    label="运行模式"
+                    value={settings.windowPolicy}
+                    options={MODES}
+                    onChange={(windowPolicy) => save({ windowPolicy })}
+                  />
+                </SettingRow>
+                {settings.windowPolicy === "smart" && (
+                  <SettingRow
+                    title="释放等待时间"
+                    help={`窗口隐藏多久后释放界面，${MIN_SECONDS}–${MAX_SECONDS} 秒`}
+                    isDefault={isDefault("smartReleaseSeconds")}
+                    onReset={() => reset("smartReleaseSeconds")}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <NumberInput
+                        label="释放等待时间（秒）"
+                        value={settings.smartReleaseSeconds}
+                        min={MIN_SECONDS}
+                        max={MAX_SECONDS}
+                        step={10}
+                        onCommit={(seconds) =>
+                          seconds !== null && save({ smartReleaseSeconds: seconds })
+                        }
+                      />
+                      秒
                     </span>
-                  </span>
+                  </SettingRow>
+                )}
+              </Section>
+
+              <Section title="外观">
+                <WidthSetting
+                  value={settings.windowWidth}
+                  defaultValue={defaults?.windowWidth}
+                  onCommit={(windowWidth) => save({ windowWidth })}
+                />
+                <SettingRow
+                  title="系统音量置底"
+                  help="系统音量放在应用列表下方，更靠近任务栏"
+                  isDefault={isDefault("masterAtBottom")}
+                  onReset={() => reset("masterAtBottom")}
+                >
+                  <Switch
+                    label="系统音量置底"
+                    checked={settings.masterAtBottom}
+                    onChange={(masterAtBottom) => save({ masterAtBottom })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="应用倒序排列"
+                  help="正在播放的应用排在列表底部，更靠近任务栏"
+                  isDefault={isDefault("appsReversed")}
+                  onReset={() => reset("appsReversed")}
+                >
+                  <Switch
+                    label="应用倒序排列"
+                    checked={settings.appsReversed}
+                    onChange={(appsReversed) => save({ appsReversed })}
+                  />
+                </SettingRow>
+              </Section>
+
+              <Section title="其他">
+                <SettingRow
+                  title="音量提示音"
+                  help="调节系统音量后播放提示音，声音大小即当前音量"
+                  isDefault={isDefault("volumeFeedback")}
+                  onReset={() => reset("volumeFeedback")}
+                >
+                  <Switch
+                    label="音量提示音"
+                    checked={settings.volumeFeedback}
+                    onChange={(volumeFeedback) => save({ volumeFeedback })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="动画帧率"
+                  help={
+                    settings.animationFps === null
+                      ? `当前跟随显示器刷新率${refreshRate ? `（${refreshRate} Hz）` : ""}；可填 ${MIN_FPS}–${MAX_FPS} 帧`
+                      : `${MIN_FPS}–${MAX_FPS} 帧，清空则跟随显示器刷新率`
+                  }
+                  isDefault={isDefault("animationFps")}
+                  onReset={() => reset("animationFps")}
+                >
                   <span className="flex items-center gap-1.5">
                     <NumberInput
-                      label="释放等待时间（秒）"
-                      value={settings.smartReleaseSeconds}
-                      min={MIN_SECONDS}
-                      max={MAX_SECONDS}
-                      step={10}
-                      onCommit={(seconds) =>
-                        seconds !== null && save({ smartReleaseSeconds: seconds })
-                      }
+                      label="动画帧率（帧 / 秒）"
+                      value={settings.animationFps}
+                      min={MIN_FPS}
+                      max={MAX_FPS}
+                      step={1}
+                      optional
+                      placeholder={refreshRate ? String(refreshRate) : "自动"}
+                      onCommit={(animationFps) => save({ animationFps })}
                     />
-                    秒
+                    帧
                   </span>
-                </label>
-              )}
-              {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-            </section>
-          )}
-          {settings && (
-            <section className="mx-3 mt-3 flex flex-col gap-3 rounded-xl border border-border bg-card p-3">
-              <SwitchRow
-                title="音量提示音"
-                hint="调节系统音量后播放提示音，声音大小即当前音量"
-                checked={settings.volumeFeedback}
-                onChange={(checked) => save({ volumeFeedback: checked })}
-              />
-              <div className="flex items-center justify-between gap-3">
-                <span>
-                  <span className="block font-medium">动画帧率</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {settings.animationFps === null
-                      ? `跟随显示器刷新率${refreshRate ? `（${refreshRate} Hz）` : ""}`
-                      : `${MIN_FPS}–${MAX_FPS} 帧，清空则跟随显示器`}
-                  </span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <NumberInput
-                    label="动画帧率（帧 / 秒）"
-                    value={settings.animationFps}
-                    min={MIN_FPS}
-                    max={MAX_FPS}
-                    step={1}
-                    optional
-                    placeholder={refreshRate ? String(refreshRate) : "自动"}
-                    onCommit={(fps) => save({ animationFps: fps })}
+                </SettingRow>
+                <SettingRow
+                  title="调试工具"
+                  help="在主界面显示“添加占位应用”按钮，用于测试多应用布局"
+                  isDefault={isDefault("debugTools")}
+                  onReset={() => reset("debugTools")}
+                >
+                  <Switch
+                    label="调试工具"
+                    checked={settings.debugTools}
+                    onChange={(debugTools) => save({ debugTools })}
                   />
-                  帧
-                </span>
-              </div>
-              <SwitchRow
-                title="调试工具"
-                hint="在主界面显示“添加占位应用”按钮，用于测试多应用布局"
-                checked={settings.debugTools}
-                onChange={(checked) => save({ debugTools: checked })}
-              />
-            </section>
+                </SettingRow>
+              </Section>
+
+              {error && <p className="mt-2 px-4 text-xs text-destructive">{error}</p>}
+            </>
           )}
         </div>
       </div>

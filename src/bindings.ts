@@ -14,15 +14,22 @@ export const commands = {
 	setAppMute: (appId: string, muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_app_mute", { appId, muted })),
 	/**  前端首次渲染完成。新建的窗口在此之后才显示，避免出现空白窗口。 */
 	windowReady: () => __TAURI_INVOKE<void>("window_ready"),
-	/**  前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。 */
-	fitWindowHeight: (contentHeight: number) => __TAURI_INVOKE<void>("fit_window_height", { contentHeight }),
+	/**
+	 *  前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。
+	 *  返回高度动画的时长（毫秒），立即完成时为 0；动画期间前端隐藏滚动条。
+	 */
+	fitWindowHeight: (contentHeight: number) => __TAURI_INVOKE<number>("fit_window_height", { contentHeight }),
 	/**  一次系统音量调节结束（松开滑块、滚轮停止）时调用，按设置播放提示音。 */
 	playVolumeFeedback: () => __TAURI_INVOKE<void>("play_volume_feedback"),
 	/**  窗口所在显示器的刷新率（Hz），读取失败时为 `None`。设置页用它显示默认帧率。 */
 	getRefreshRate: () => __TAURI_INVOKE<number | null>("get_refresh_rate"),
 	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings"),
+	/**  各设置项的默认值。设置页据此判断是否显示“恢复默认”。 */
+	getDefaultSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_default_settings"),
 	/**  保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。 */
 	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings })),
+	/**  设置页拖动宽度滑块时预览窗口宽度（逻辑像素），不写入设置；松手后由 `set_settings` 保存。 */
+	previewWindowWidth: (width: number) => __TAURI_INVOKE<void>("preview_window_width", { width }),
 };
 
 /** Events */
@@ -105,6 +112,12 @@ export type Settings_Deserialize = {
 	debugTools?: boolean,
 	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。 */
 	animationFps?: number | null,
+	/**  窗口宽度（逻辑像素）。 */
+	windowWidth?: number,
+	/**  系统音量放在应用列表下方（靠近任务栏），默认在上方。 */
+	masterAtBottom?: boolean,
+	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。 */
+	appsReversed?: boolean,
 };
 
 export type Settings_Serialize = {
@@ -117,6 +130,12 @@ export type Settings_Serialize = {
 	debugTools: boolean,
 	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。 */
 	animationFps: number | null,
+	/**  窗口宽度（逻辑像素）。 */
+	windowWidth: number,
+	/**  系统音量放在应用列表下方（靠近任务栏），默认在上方。 */
+	masterAtBottom: boolean,
+	/**  应用列表倒序：活跃应用排在底部，更靠近任务栏。 */
+	appsReversed: boolean,
 };
 
 export type VolumeState = {

@@ -2,6 +2,7 @@ mod animation;
 mod audio;
 mod commands;
 mod config;
+mod context_menu;
 mod error;
 mod events;
 mod feedback;
@@ -12,7 +13,7 @@ mod window;
 use tauri::{Manager, RunEvent};
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::audio::AudioService;
+use crate::audio::{AudioService, Update};
 
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
@@ -32,7 +33,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::play_volume_feedback,
             commands::get_refresh_rate,
             commands::get_settings,
+            commands::get_default_settings,
             commands::set_settings,
+            commands::preview_window_width,
         ])
         .events(collect_events![
             events::AudioSnapshotEvent,
@@ -82,8 +85,9 @@ pub fn run() {
             app.manage(config::Config::load(app.handle()));
 
             let handle = app.handle().clone();
-            app.manage(AudioService::start(move |update| {
-                events::emit(&handle, update)
+            app.manage(AudioService::start(move |update| match update {
+                Update::MasterStatus(status) => tray::show_status(&handle, status),
+                update => events::emit(&handle, update),
             }));
             tray::create(app)?;
             window::init(app.handle())?;

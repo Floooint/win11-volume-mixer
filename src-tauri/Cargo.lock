@@ -4359,6 +4359,7 @@ dependencies = [
  "tauri-specta",
  "thiserror 2.0.21",
  "tokio",
+ "webview2-com",
  "windows",
  "windows-core",
 ]

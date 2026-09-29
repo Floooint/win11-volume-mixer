@@ -4,6 +4,7 @@ import { commands } from "@/bindings";
 /**
  * 让窗口高度跟随内容：窗口高度 = 页面固定部分 + 滚动区内容的完整高度。
  * 后端把高度限制在屏幕的 4/5 以内，超出时滚动区出现滚动条。
+ * 窗口可见时后端以动画调整高度；动画期间窗口可能暂时比内容矮，因此隐藏滚动条，结束后恢复。
  *
  * @param rootRef    页面根元素（高度为 100%）
  * @param scrollRef  可滚动区域（`flex-1 min-h-0 overflow-y-auto`）
@@ -22,6 +23,11 @@ export function useFitWindowHeight(
 
     let frame = 0;
     let lastSent = 0;
+    let resizeEnd: ReturnType<typeof setTimeout> | undefined;
+    const endResize = () => {
+      clearTimeout(resizeEnd);
+      scroll.style.overflowY = "";
+    };
     const measure = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
@@ -31,7 +37,14 @@ export function useFitWindowHeight(
         const height = Math.ceil(fixed + content.getBoundingClientRect().height);
         if (height !== lastSent) {
           lastSent = height;
-          void commands.fitWindowHeight(height);
+          clearTimeout(resizeEnd);
+          scroll.style.overflowY = "hidden";
+          void commands.fitWindowHeight(height).then((ms) => {
+            // 期间又发起了新的调整时，由新的调整负责恢复。
+            if (lastSent !== height) return;
+            if (ms > 0) resizeEnd = setTimeout(endResize, ms);
+            else endResize();
+          });
         }
       });
     };
@@ -45,6 +58,7 @@ export function useFitWindowHeight(
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      endResize();
     };
   }, [rootRef, scrollRef, contentRef]);
 }

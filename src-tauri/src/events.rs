@@ -36,6 +36,8 @@ pub fn emit(app: &AppHandle, update: Update) {
         Update::Master(master) => MasterChangedEvent(master).emit(app),
         Update::AppUpsert(audio) => AppUpsertEvent(audio).emit(app),
         Update::AppRemove(app_id) => AppRemoveEvent { app_id }.emit(app),
+        // 只用于托盘图标，由 lib.rs 转给 tray 模块，不推送给前端。
+        Update::MasterStatus(_) => Ok(()),
     };
     if let Err(e) = result {
         eprintln!("[events] 推送失败：{e}");

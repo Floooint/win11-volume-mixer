@@ -1,3 +1,4 @@
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { useEffect, useState } from "react";
 import { MainPage } from "@/components/MainPage";
 import { SettingsPage } from "@/components/SettingsPage";
@@ -14,12 +15,17 @@ export default function App() {
   useEffect(() => void loadSettings(), [loadSettings]);
 
   return (
-    <main className="h-screen overflow-hidden text-sm">
-      {page === "main" ? (
-        <MainPage onOpenSettings={() => setPage("settings")} />
-      ) : (
-        <SettingsPage onBack={() => setPage("main")} />
-      )}
-    </main>
+    <TooltipPrimitive.Provider delayDuration={300}>
+      <main className="h-screen overflow-hidden text-sm">
+        {/* 以页面为 key：切换时重新挂载并播放淡入动画。 */}
+        <div key={page} className="h-full motion-safe:animate-page-in">
+          {page === "main" ? (
+            <MainPage onOpenSettings={() => setPage("settings")} />
+          ) : (
+            <SettingsPage onBack={() => setPage("main")} />
+          )}
+        </div>
+      </main>
+    </TooltipPrimitive.Provider>
   );
 }

@@ -14,15 +14,12 @@ use tauri::{
 };
 
 use crate::animation::{self, Generation};
-use crate::config::{Config, WindowPolicy};
+use crate::config::{Config, WIDTH_RANGE, WindowPolicy};
 
 pub const MAIN: &str = "main";
 
 /// 窗口与任务栏之间的间距（物理像素，按 DPI 缩放前为 12 px）。
 const MARGIN: f64 = 12.0;
-
-/// 窗口宽度（逻辑像素），与 `tauri.conf.json` 中的 `width` 一致。
-const WIDTH: f64 = 380.0;
 
 /// 窗口最小高度（逻辑像素）。
 const MIN_HEIGHT: f64 = 160.0;
@@ -49,11 +46,29 @@ pub struct WindowState {
     animation: Generation,
     /// 是否正在播放滑出动画。
     hiding: AtomicBool,
+    /// 是否正在播放滑入动画。此时高度变化不做动画，避免两个动画同时移动窗口。
+    entering: AtomicBool,
+    /// 高度动画代数，新的高度变化会取消进行中的动画。
+    resize: Generation,
+    /// 设置页拖动宽度滑块时的预览宽度（逻辑像素），保存后清除。
+    preview_width: Mutex<Option<u32>>,
 }
 
 struct Pending {
     tray: Option<Rect>,
     requested_at: Instant,
+}
+
+/// 当前窗口宽度（逻辑像素）：正在预览时用预览值，否则用设置值。
+fn logical_width<R: Runtime, M: Manager<R>>(manager: &M) -> f64 {
+    let preview = manager
+        .state::<WindowState>()
+        .preview_width
+        .lock()
+        .ok()
+        .and_then(|w| *w);
+    let width = preview.unwrap_or_else(|| manager.state::<Config>().get().window_width);
+    f64::from(width.clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end()))
 }
 
 fn policy<R: Runtime, M: Manager<R>>(manager: &M) -> WindowPolicy {
@@ -191,6 +206,7 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .expect("tauri.conf.json 中缺少主窗口配置");
     let window = WebviewWindowBuilder::from_config(app, config)?.build()?;
     disable_system_transitions(&window);
+    let _ = window.with_webview(|webview| crate::context_menu::install(&webview.controller()));
     Ok(window)
 }
 
@@ -280,7 +296,11 @@ pub fn ready<R: Runtime>(app: &AppHandle<R>) {
 fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
     let tray = remember_tray(window, tray);
     // 用计算出的目标位置，而不是移动后再读回：非主线程上 set_position 是异步的，读回可能是旧值。
-    let target = match tray.map(|tray| target_near_tray(window, tray)) {
+    let target = match tray.map(|tray| {
+        window
+            .outer_size()
+            .and_then(|size| target_near_tray(window, tray, size))
+    }) {
         Some(Ok(Some(target))) => Some(target),
         Some(Err(e)) => {
             eprintln!("[window] 定位失败：{e}");
@@ -302,7 +322,9 @@ fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
     let _ = window.unminimize();
     let _ = window.set_focus();
 
-    let generation = window.state::<WindowState>().animation.next();
+    let state = window.state::<WindowState>();
+    let generation = state.animation.next();
+    state.entering.store(true, Ordering::SeqCst);
     let window = window.clone();
     std::thread::spawn(move || {
         let state = window.state::<WindowState>();
@@ -319,6 +341,9 @@ fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
         // 被新的动画取消时不修正位置，交给新动画处理。
         if completed {
             let _ = window.set_position(target);
+        }
+        if state.animation.is_current(generation) {
+            state.entering.store(false, Ordering::SeqCst);
         }
     });
 }
@@ -343,6 +368,7 @@ fn cancel_hide_animation<R: Runtime, M: Manager<R>>(manager: &M) {
     let state = manager.state::<WindowState>();
     state.animation.next();
     state.hiding.store(false, Ordering::SeqCst);
+    state.entering.store(false, Ordering::SeqCst);
 }
 
 /// 隐藏窗口：先向下滑出屏幕，再按运行模式隐藏或释放。
@@ -351,8 +377,10 @@ fn hide<R: Runtime>(window: &tauri::Window<R>) {
     if state.hiding.swap(true, Ordering::SeqCst) {
         return;
     }
-    // 也会取消进行中的滑入动画。
+    // 也会取消进行中的滑入动画和高度动画。
     let generation = state.animation.next();
+    state.entering.store(false, Ordering::SeqCst);
+    state.resize.next();
     let window = window.clone();
     // 动画逐帧 sleep，放在独立线程，不阻塞事件循环。
     std::thread::spawn(move || {
@@ -425,18 +453,27 @@ pub fn fitted_height(content: f64, scale: f64, screen_height: f64, work_area_hei
 }
 
 /// 前端报告内容高度（逻辑像素）后调整窗口高度，并保持贴近托盘。
-pub fn fit_height<R: Runtime>(window: &WebviewWindow<R>, content: f64) {
-    if let Err(e) = try_fit_height(window, content) {
-        eprintln!("[window] 调整高度失败：{e}");
+/// 窗口可见时以动画过渡，返回动画时长（毫秒），立即完成时返回 0。
+pub fn fit_height<R: Runtime>(window: &WebviewWindow<R>, content: f64) -> u32 {
+    match try_fit_height(window, content) {
+        Ok(Some(duration)) => duration.as_millis() as u32,
+        Ok(None) => 0,
+        Err(e) => {
+            eprintln!("[window] 调整高度失败：{e}");
+            0
+        }
     }
 }
 
-fn try_fit_height<R: Runtime>(window: &WebviewWindow<R>, content: f64) -> tauri::Result<()> {
+fn try_fit_height<R: Runtime>(
+    window: &WebviewWindow<R>,
+    content: f64,
+) -> tauri::Result<Option<Duration>> {
     if !content.is_finite() || content <= 0.0 {
-        return Ok(());
+        return Ok(None);
     }
     let Some(monitor) = window.current_monitor()?.or(window.primary_monitor()?) else {
-        return Ok(());
+        return Ok(None);
     };
     let height = fitted_height(
         content,
@@ -446,35 +483,156 @@ fn try_fit_height<R: Runtime>(window: &WebviewWindow<R>, content: f64) -> tauri:
     );
     // `set_size` 设置的是内容区尺寸，而 `outer_size` 含边框。若用读回的外框宽度去设置，
     // 每次调整都会多出边框宽度，窗口越来越宽。因此宽度始终使用配置中的固定值。
-    let width = (WIDTH * monitor.scale_factor()).round() as u32;
+    let width = (logical_width(window) * monitor.scale_factor()).round() as u32;
     let size = window.inner_size()?;
     if size.height == height && size.width == width {
+        return Ok(None);
+    }
+
+    let state = window.state::<WindowState>();
+    let tray = state.last_tray.lock().ok().and_then(|t| *t);
+    // 滑入 / 滑出动画进行中不打断，隐藏时由下次显示负责定位。
+    let visible = window.is_visible()?
+        && !state.hiding.load(Ordering::SeqCst)
+        && !state.entering.load(Ordering::SeqCst);
+    if visible && let Some(tray) = tray {
+        return animate_height(window, tray, PhysicalSize::new(width, height));
+    }
+
+    state.resize.next();
+    window.set_size(PhysicalSize::new(width, height))?;
+    if visible && let Some(tray) = tray {
+        move_near_tray(window, tray)?;
+    }
+    Ok(None)
+}
+
+/// 预览宽度（设置页拖动滑块时），`None` 表示结束预览、恢复为设置值。立即生效，不写入设置。
+pub fn preview_width<R: Runtime>(window: &WebviewWindow<R>, width: Option<u32>) {
+    if let Ok(mut preview) = window.state::<WindowState>().preview_width.lock() {
+        *preview = width;
+    }
+    apply_width(window);
+}
+
+/// 按当前宽度（预览值或设置值）调整窗口，高度不变，并保持贴近托盘。
+pub fn apply_width<R: Runtime>(window: &WebviewWindow<R>) {
+    if let Err(e) = try_apply_width(window) {
+        eprintln!("[window] 调整宽度失败：{e}");
+    }
+}
+
+fn try_apply_width<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
+    let inner = window.inner_size()?;
+    let width = (logical_width(window) * window.scale_factor()?).round() as u32;
+    if inner.width == width {
         return Ok(());
     }
-    window.set_size(PhysicalSize::new(width, height))?;
-
-    // 可见时立即重新定位；隐藏时由下次显示负责定位。滑出动画进行中不打断。
     let state = window.state::<WindowState>();
-    if window.is_visible()? && !state.hiding.load(Ordering::SeqCst) {
-        let tray = state.last_tray.lock().ok().and_then(|t| *t);
-        if let Some(tray) = tray {
-            move_near_tray(window, tray)?;
+    // 取消进行中的高度动画，它按旧宽度逐帧设置尺寸。
+    state.resize.next();
+    let tray = state.last_tray.lock().ok().and_then(|t| *t);
+    let visible = window.is_visible()? && !state.hiding.load(Ordering::SeqCst);
+    let new_inner = PhysicalSize::new(width, inner.height);
+    if visible && let Some(tray) = tray {
+        let outer = window.outer_size()?;
+        let to_size = PhysicalSize::new(
+            width + outer.width.saturating_sub(inner.width),
+            outer.height,
+        );
+        if let Some(pos) = target_near_tray(window, tray, to_size)? {
+            // 位置和尺寸一次设置，拖动滑块时窗口不会左右抖动。
+            set_bounds(
+                window.hwnd()?.0 as isize,
+                pos.x,
+                pos.y,
+                to_size.width as i32,
+                to_size.height as i32,
+            );
+            return Ok(());
         }
     }
-    Ok(())
+    window.set_size(new_inner)
+}
+
+/// 以动画把窗口内容区调整到 `inner`，同时移动窗口保持贴近托盘（任务栏在底部时底边不动）。
+/// 每帧用一次 `SetWindowPos` 同时设置位置和尺寸，避免先改尺寸再移动造成的跳动。
+fn animate_height<R: Runtime>(
+    window: &WebviewWindow<R>,
+    tray: Rect,
+    inner: PhysicalSize<u32>,
+) -> tauri::Result<Option<Duration>> {
+    let from_size = window.outer_size()?;
+    let from_pos = window.outer_position()?;
+    let current_inner = window.inner_size()?;
+    let border_w = from_size.width.saturating_sub(current_inner.width);
+    let border_h = from_size.height.saturating_sub(current_inner.height);
+    let to_size = PhysicalSize::new(inner.width + border_w, inner.height + border_h);
+    let Some(to_pos) = target_near_tray(window, tray, to_size)? else {
+        window.set_size(inner)?;
+        return Ok(None);
+    };
+    let hwnd = window.hwnd()?.0 as isize;
+
+    let state = window.state::<WindowState>();
+    let generation = state.resize.next();
+    let fps = fps(&window.as_ref().window());
+    let window = window.clone();
+    std::thread::spawn(move || {
+        let state = window.state::<WindowState>();
+        animation::run(
+            animation::RESIZE,
+            fps,
+            || state.resize.is_current(generation) && !state.hiding.load(Ordering::SeqCst),
+            |p| {
+                set_bounds(
+                    hwnd,
+                    animation::lerp(from_pos.x, to_pos.x, p),
+                    animation::lerp(from_pos.y, to_pos.y, p),
+                    animation::lerp(from_size.width as i32, to_size.width as i32, p),
+                    animation::lerp(from_size.height as i32, to_size.height as i32, p),
+                );
+            },
+        );
+    });
+    Ok(Some(animation::RESIZE.duration))
+}
+
+/// 同时设置窗口外框的位置和尺寸（物理像素）。异步投递给窗口所在线程，不等待它处理。
+fn set_bounds(hwnd: isize, x: i32, y: i32, width: i32, height: i32) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
+    };
+    // SAFETY: hwnd 来自存活的主窗口；窗口销毁后调用只会返回错误。
+    let result = unsafe {
+        SetWindowPos(
+            HWND(hwnd as *mut _),
+            None,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+        )
+    };
+    if let Err(e) = result {
+        eprintln!("[window] 调整窗口失败：{e}");
+    }
 }
 
 fn move_near_tray<R: Runtime>(window: &WebviewWindow<R>, tray: Rect) -> tauri::Result<()> {
-    if let Some(target) = target_near_tray(window, tray)? {
+    if let Some(target) = target_near_tray(window, tray, window.outer_size()?)? {
         window.set_position(target)?;
     }
     Ok(())
 }
 
-/// 计算窗口贴近托盘时的左上角位置；取不到显示器信息时返回 `None`。
+/// 计算外框尺寸为 `size` 的窗口贴近托盘时的左上角位置；取不到显示器信息时返回 `None`。
 fn target_near_tray<R: Runtime>(
     window: &WebviewWindow<R>,
     tray: Rect,
+    size: PhysicalSize<u32>,
 ) -> tauri::Result<Option<PhysicalPosition<i32>>> {
     let Some(monitor) = window
         .monitor_from_point(tray.x + tray.width / 2.0, tray.y + tray.height / 2.0)?
@@ -482,7 +640,6 @@ fn target_near_tray<R: Runtime>(
     else {
         return Ok(None);
     };
-    let size = window.outer_size()?;
     let to_rect = |pos: PhysicalPosition<i32>, width: u32, height: u32| Rect {
         x: pos.x.into(),
         y: pos.y.into(),

@@ -83,10 +83,11 @@ pub fn get_refresh_rate(window: tauri::WebviewWindow) -> Option<u32> {
 }
 
 /// 前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。
+/// 返回高度动画的时长（毫秒），立即完成时为 0；动画期间前端隐藏滚动条。
 #[tauri::command]
 #[specta::specta]
-pub fn fit_window_height(window: tauri::WebviewWindow, content_height: f64) {
-    crate::window::fit_height(&window, content_height);
+pub fn fit_window_height(window: tauri::WebviewWindow, content_height: f64) -> u32 {
+    crate::window::fit_height(&window, content_height)
 }
 
 #[tauri::command]
@@ -95,11 +96,32 @@ pub fn get_settings(config: State<'_, Config>) -> Settings {
     config.get()
 }
 
+/// 各设置项的默认值。设置页据此判断是否显示“恢复默认”。
+#[tauri::command]
+#[specta::specta]
+pub fn get_default_settings() -> Settings {
+    Settings::default()
+}
+
 /// 保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。
 #[tauri::command]
 #[specta::specta]
-pub fn set_settings(config: State<'_, Config>, settings: Settings) -> AppResult<()> {
-    config.set(settings).map(|_| ())
+pub fn set_settings(
+    window: tauri::WebviewWindow,
+    config: State<'_, Config>,
+    settings: Settings,
+) -> AppResult<()> {
+    let result = config.set(settings).map(|_| ());
+    // 结束宽度预览，按设置中的值调整；保存失败时即恢复为原来的宽度。
+    crate::window::preview_width(&window, None);
+    result
+}
+
+/// 设置页拖动宽度滑块时预览窗口宽度（逻辑像素），不写入设置；松手后由 `set_settings` 保存。
+#[tauri::command]
+#[specta::specta]
+pub fn preview_window_width(window: tauri::WebviewWindow, width: u32) {
+    crate::window::preview_width(&window, Some(width));
 }
 
 /// Windows 要求标量音量在 0–1 之间，超出范围会返回 E_INVALIDARG。

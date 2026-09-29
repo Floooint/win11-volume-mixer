@@ -17,6 +17,10 @@ const FILE_NAME: &str = "settings.json";
 pub const SMART_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
 const DEFAULT_SMART_SECONDS: u32 = 300;
 
+/// 窗口宽度范围（逻辑像素），须与 `tauri.conf.json` 的 `minWidth` / `maxWidth` 一致。
+pub const WIDTH_RANGE: std::ops::RangeInclusive<u32> = 280..=500;
+const DEFAULT_WIDTH: u32 = 340;
+
 /// 窗口隐藏后的运行模式。实测数据见 docs/architecture.md“决策记录”。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +48,12 @@ pub struct Settings {
     pub debug_tools: bool,
     /// 窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。
     pub animation_fps: Option<u32>,
+    /// 窗口宽度（逻辑像素）。
+    pub window_width: u32,
+    /// 系统音量放在应用列表下方（靠近任务栏），默认在上方。
+    pub master_at_bottom: bool,
+    /// 应用列表倒序：活跃应用排在底部，更靠近任务栏。
+    pub apps_reversed: bool,
 }
 
 impl Default for Settings {
@@ -54,6 +64,9 @@ impl Default for Settings {
             volume_feedback: true,
             debug_tools: false,
             animation_fps: None,
+            window_width: DEFAULT_WIDTH,
+            master_at_bottom: false,
+            apps_reversed: false,
         }
     }
 }
@@ -67,6 +80,9 @@ impl Settings {
         self.animation_fps = self
             .animation_fps
             .map(|fps| fps.clamp(*FPS_RANGE.start(), *FPS_RANGE.end()));
+        self.window_width = self
+            .window_width
+            .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
         self
     }
 }
@@ -152,6 +168,9 @@ mod tests {
         assert!(settings.volume_feedback, "默认开启提示音");
         assert!(!settings.debug_tools, "默认关闭调试工具");
         assert_eq!(settings.animation_fps, None, "默认跟随显示器刷新率");
+        assert_eq!(settings.window_width, 340);
+        assert!(!settings.master_at_bottom, "默认系统音量在上方");
+        assert!(!settings.apps_reversed, "默认活跃应用在上方");
     }
 
     #[test]
@@ -168,10 +187,13 @@ mod tests {
             volume_feedback: false,
             debug_tools: true,
             animation_fps: Some(120),
+            window_width: 400,
+            master_at_bottom: true,
+            apps_reversed: true,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r#"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120}"#
+            r#"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true}"#
         );
     }
 
@@ -201,6 +223,17 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(too_large.normalized().smart_release_seconds, 600);
+    }
+
+    #[test]
+    fn 宽度被限制在范围内() {
+        let settings = |window_width| Settings {
+            window_width,
+            ..Settings::default()
+        };
+        assert_eq!(settings(100).normalized().window_width, 280);
+        assert_eq!(settings(9999).normalized().window_width, 500);
+        assert_eq!(settings(450).normalized().window_width, 450);
     }
 
     #[test]

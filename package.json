@@ -15,7 +15,9 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-slider": "^1.4.7",
+    "@radix-ui/react-tooltip": "^1.2.16",
     "@tauri-apps/api": "^2",
     "clsx": "^2.1.1",
     "lucide-react": "^1.48.0",

@@ -1,4 +1,4 @@
-//! 窗口滑入 / 滑出动画：在后台线程逐帧移动窗口。
+//! 窗口动画：滑入 / 滑出、高度变化。在后台线程逐帧移动或缩放窗口。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -60,6 +60,12 @@ pub const EXIT: Motion = Motion {
     curve: CubicBezier::new(0.32, 0.0, 0.67, 0.0),
 };
 
+/// 高度变化（切换页面、应用增减）：ease-out cubic，与进入相同的曲线，时长更长以便看清变化。
+pub const RESIZE: Motion = Motion {
+    duration: Duration::from_millis(180),
+    curve: CubicBezier::new(0.33, 1.0, 0.68, 1.0),
+};
+
 /// CSS 同款三次贝塞尔缓动曲线，端点固定为 (0,0) 和 (1,1)。
 #[derive(Debug, Clone, Copy)]
 pub struct CubicBezier {
@@ -110,6 +116,34 @@ impl Generation {
     }
 }
 
+/// 按 `motion` 以 `fps` 帧率播放动画，每帧以缓动后的进度（0–1）调用 `frame`，最后一帧为 1。
+/// 返回 `true` 表示完整播放，`false` 表示中途被取消。
+pub fn run(
+    motion: Motion,
+    fps: u32,
+    still_current: impl Fn() -> bool,
+    frame: impl Fn(f64),
+) -> bool {
+    let interval = frame_interval(fps);
+    let start = Instant::now();
+    loop {
+        if !still_current() {
+            return false;
+        }
+        let progress = start.elapsed().as_secs_f64() / motion.duration.as_secs_f64();
+        frame(motion.curve.ease(progress));
+        if progress >= 1.0 {
+            return true;
+        }
+        std::thread::sleep(interval);
+    }
+}
+
+/// 从 `from` 到 `to` 按进度插值并取整。
+pub fn lerp(from: i32, to: i32, progress: f64) -> i32 {
+    (f64::from(from) + f64::from(to - from) * progress).round() as i32
+}
+
 /// 按 `motion` 以 `fps` 帧率从 `from_y` 移动到 `to_y`，每帧调用 `move_to(y)`。
 /// 返回 `true` 表示完整播放，`false` 表示中途被取消。
 pub fn slide(
@@ -120,21 +154,9 @@ pub fn slide(
     still_current: impl Fn() -> bool,
     move_to: impl Fn(i32),
 ) -> bool {
-    let frame = frame_interval(fps);
-    let start = Instant::now();
-    loop {
-        if !still_current() {
-            return false;
-        }
-        let progress = start.elapsed().as_secs_f64() / motion.duration.as_secs_f64();
-        let eased = motion.curve.ease(progress);
-        let y = from_y as f64 + (to_y - from_y) as f64 * eased;
-        move_to(y.round() as i32);
-        if progress >= 1.0 {
-            return true;
-        }
-        std::thread::sleep(frame);
-    }
+    run(motion, fps, still_current, |progress| {
+        move_to(lerp(from_y, to_y, progress))
+    })
 }
 
 #[cfg(test)]
@@ -144,7 +166,7 @@ mod tests {
 
     #[test]
     fn 曲线端点为0和1() {
-        for motion in [ENTER, EXIT] {
+        for motion in [ENTER, EXIT, RESIZE] {
             assert!(motion.curve.ease(0.0).abs() < 1e-9);
             assert!((motion.curve.ease(1.0) - 1.0).abs() < 1e-9);
         }
@@ -285,6 +307,14 @@ mod tests {
         };
         let (low, high) = (count(30), count(240));
         assert!(high > low, "240 帧（{high}）应多于 30 帧（{low}）");
+    }
+
+    #[test]
+    fn 插值取整且端点准确() {
+        assert_eq!(lerp(100, 300, 0.0), 100);
+        assert_eq!(lerp(100, 300, 0.5), 200);
+        assert_eq!(lerp(300, 100, 1.0), 100);
+        assert_eq!(lerp(0, 3, 0.5), 2, "1.5 四舍五入为 2");
     }
 
     #[test]

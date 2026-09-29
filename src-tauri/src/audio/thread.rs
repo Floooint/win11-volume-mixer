@@ -20,7 +20,7 @@ use super::aggregate::{self, SessionData};
 use super::device::{Device, DeviceNotifier};
 use super::session::{self, SessionNotifier, TrackedSession};
 use super::types::{AudioSnapshot, DeviceInfo, VolumeState};
-use super::{Command, Msg, Reply, Update};
+use super::{Command, MasterStatus, Msg, Reply, Update};
 use crate::error::{AppError, AppResult, ErrorCode};
 
 /// 变化合并窗口：同一窗口内的多次变化只推送一次。
@@ -54,6 +54,12 @@ impl AudioService {
             .send(Msg::Command(make(reply)))
             .map_err(|_| thread_down())?;
         result.await.map_err(|_| thread_down())?
+    }
+
+    /// 发送请求但不等待结果，供不能等待的调用方（如鼠标钩子）使用。
+    pub fn post(&self, make: impl FnOnce(Reply<()>) -> Command) {
+        let (reply, _) = oneshot::channel();
+        let _ = self.tx.send(Msg::Command(make(reply)));
     }
 
     /// 通知音频线程退出并等待其释放 COM 资源。可重复调用。
@@ -103,6 +109,8 @@ struct State {
     /// 最近一次推送或返回给前端的状态，用于计算差异。
     last: AudioSnapshot,
     pending: Pending,
+    /// 最近一次推送给托盘的系统音量状态；外层 `None` 表示尚未推送过。
+    reported_master: Option<Option<MasterStatus>>,
 }
 
 impl State {
@@ -125,9 +133,11 @@ impl State {
                 apps: Vec::new(),
             },
             pending: Pending::default(),
+            reported_master: None,
         };
         state.open_device()?;
         state.last = state.snapshot();
+        state.report_master();
         Ok(state)
     }
 
@@ -172,12 +182,15 @@ impl State {
         match msg {
             Msg::Command(Command::Shutdown) => return false,
             Msg::Command(command) => self.handle_command(command),
-            // 自身修改：前端已持有最新值，不再推送回去，避免滑块回跳。
-            Msg::MasterChanged { is_self: true } | Msg::SessionVolumeChanged { is_self: true } => {}
-            Msg::MasterChanged { is_self: false }
-            | Msg::SessionVolumeChanged { is_self: false } => {
-                self.mark_dirty(false);
+            // 自身修改：前端已持有最新值，不再推送回去，避免滑块回跳。托盘图标仍需更新。
+            Msg::MasterChanged { is_self } => {
+                self.report_master();
+                if !is_self {
+                    self.mark_dirty(false);
+                }
             }
+            Msg::SessionVolumeChanged { is_self: true } => {}
+            Msg::SessionVolumeChanged { is_self: false } => self.mark_dirty(false),
             Msg::SessionCreated => {
                 let result = self.refresh_sessions();
                 self.log_err(result);
@@ -199,6 +212,7 @@ impl State {
                 self.close_device();
                 let result = self.open_device();
                 self.log_err(result);
+                self.report_master();
                 self.mark_dirty(true);
             }
         }
@@ -220,6 +234,22 @@ impl State {
             Command::SetMasterMute(muted, reply) => {
                 let result = self.device().and_then(|d| Ok(d.set_master_mute(muted)?));
                 self.reply_after_set(reply, result);
+            }
+            // 这两个请求不是由前端发起的，前端不知道新值，因此按外部变化推送。
+            Command::AdjustMasterVolume(delta, reply) => {
+                let result = self.device().and_then(|d| {
+                    let volume = (d.master()?.volume + delta).clamp(0.0, 1.0);
+                    Ok(d.set_master_volume(volume)?)
+                });
+                self.mark_dirty(false);
+                let _ = reply.send(result);
+            }
+            Command::ToggleMasterMute(reply) => {
+                let result = self
+                    .device()
+                    .and_then(|d| Ok(d.set_master_mute(!d.master()?.muted)?));
+                self.mark_dirty(false);
+                let _ = reply.send(result);
             }
             Command::SetAppVolume(app_id, volume, reply) => {
                 let result = self.for_app_sessions(&app_id, |s| s.set_volume(volume));
@@ -268,6 +298,21 @@ impl State {
             }
         }
         self.last = new;
+    }
+
+    /// 系统音量状态有变化时推送给托盘。
+    fn report_master(&mut self) {
+        let status = self.device.as_ref().map(|d| MasterStatus {
+            device_name: d.name.clone(),
+            volume: d.master().unwrap_or(VolumeState {
+                volume: 0.0,
+                muted: false,
+            }),
+        });
+        if self.reported_master.as_ref() != Some(&status) {
+            self.reported_master = Some(status.clone());
+            (self.emit)(Update::MasterStatus(status));
+        }
     }
 
     fn snapshot(&self) -> AudioSnapshot {

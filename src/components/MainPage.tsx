@@ -1,11 +1,12 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type AppAudio, commands } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Plus } from "@/components/animate-ui/icons/plus";
 import { Settings as SettingsIcon } from "@/components/animate-ui/icons/settings";
 import { Trash2 } from "@/components/animate-ui/icons/trash-2";
 import { IconButton } from "@/components/IconButton";
+import { MainPageSkeleton, Skeleton } from "@/components/Skeleton";
 import { VolumeRow } from "@/components/VolumeRow";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
 import { cn } from "@/lib/utils";
@@ -14,7 +15,7 @@ import { useSettingsStore } from "@/stores/settings";
 import { DEBUG_APP_PREFIX, useDebugStore } from "@/stores/debug";
 
 /**
- * 应用图标，由后端经 `appicon` 协议提供。加载期间留空，避免首字母一闪而过；
+ * 应用图标，由后端经 `appicon` 协议提供。加载期间显示骨架占位，避免首字母一闪而过；
  * 没有图标来源或加载失败时显示首字母占位，正在发声时换成强调色。
  * 调用方以 `app.icon` 作为 key，来源变化时重置加载状态。
  */
@@ -25,7 +26,8 @@ function AppAvatar({ app }: { app: AppAudio }) {
 
   if (app.icon && status !== "error") {
     return (
-      <div aria-hidden className="flex size-8 shrink-0 items-center justify-center">
+      <div aria-hidden className="relative flex size-8 shrink-0 items-center justify-center">
+        {status === "loading" && <Skeleton className="absolute size-7 rounded-lg" />}
         <img
           src={convertFileSrc(app.icon, "appicon")}
           alt=""
@@ -33,7 +35,7 @@ function AppAvatar({ app }: { app: AppAudio }) {
           onLoad={() => setStatus("loaded")}
           onError={() => setStatus("error")}
           className={cn(
-            "size-7 object-contain transition-opacity",
+            "relative size-7 object-contain transition-opacity",
             status === "loading" && "opacity-0",
           )}
         />
@@ -138,13 +140,37 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const clearDebugApps = useDebugStore((s) => s.clear);
   const debugTools = useSettingsStore((s) => s.settings?.debugTools ?? false);
 
+  const masterAtBottom = useSettingsStore((s) => s.settings?.masterAtBottom ?? false);
+  const appsReversed = useSettingsStore((s) => s.settings?.appsReversed ?? false);
+
   const device = snapshot?.device;
+  const masterSection = device && (
+    <section className="mx-3 rounded-xl border border-border bg-card px-3 py-3">
+      <VolumeRow
+        name="系统音量"
+        detail={device.name}
+        volume={device.master}
+        onVolumeChange={setMasterVolume}
+        onMuteChange={setMasterMute}
+        onVolumeCommit={() => void commands.playVolumeFeedback()}
+      />
+    </section>
+  );
   const apps = [...(snapshot?.apps ?? []), ...(debugTools ? debugApps : [])];
+  // 倒序：正在播放的应用排在底部，更靠近任务栏。
+  if (appsReversed) apps.reverse();
 
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   useFitWindowHeight(rootRef, scrollRef, contentRef);
+
+  // 倒序时列表可滚动，默认停在底部，先看到正在播放的应用。
+  const loaded = snapshot !== null;
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    if (appsReversed && loaded && scroll) scroll.scrollTop = scroll.scrollHeight;
+  }, [appsReversed, loaded]);
 
   return (
     <div ref={rootRef} className="relative flex h-full flex-col">
@@ -169,27 +195,21 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         </div>
       </header>
 
-      {/* 系统音量固定在顶部，只有应用列表滚动。 */}
-      {device && (
+      {/* 系统音量固定在顶部（或底部），只有应用列表滚动。 */}
+      {device && !masterAtBottom && (
         <>
-          <section className="mx-3 rounded-xl border border-border bg-card px-3 py-3">
-            <VolumeRow
-              name="系统音量"
-              detail={device.name}
-              volume={device.master}
-              onVolumeChange={setMasterVolume}
-              onMuteChange={setMasterMute}
-              onVolumeCommit={() => void commands.playVolumeFeedback()}
-            />
-          </section>
+          {masterSection}
           <h2 className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">应用</h2>
         </>
       )}
+      {device && masterAtBottom && (
+        <h2 className="px-4 pt-1 pb-1 text-xs font-medium text-muted-foreground">应用</h2>
+      )}
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={contentRef} className="pb-3">
+      <div ref={scrollRef} className="scroll-area min-h-0 flex-1 overflow-y-auto">
+        <div ref={contentRef} className={device && masterAtBottom ? "pb-2" : "pb-3"}>
           {snapshot === null ? (
-            <p className="px-4 py-8 text-center text-sm text-muted-foreground">正在读取音频设备…</p>
+            <MainPageSkeleton masterAtBottom={masterAtBottom} />
           ) : !device ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">未检测到输出设备</p>
           ) : apps.length === 0 ? (
@@ -199,7 +219,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
             </div>
           ) : (
             // 可滚动时滚轮用于滚动列表，不调节应用音量；系统音量不受影响。
-            <ul className="flex flex-col gap-1 px-3">
+            <ul className="flex flex-col gap-1 pr-1 pl-3">
               {apps.map((app) => (
                 <AppItem key={app.appId} app={app} scrollAreaRef={scrollRef} />
               ))}
@@ -207,6 +227,8 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           )}
         </div>
       </div>
+
+      {device && masterAtBottom && <div className="pb-3">{masterSection}</div>}
 
       <ErrorToast />
     </div>
