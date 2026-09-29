@@ -3,6 +3,7 @@
 # 用法：powershell -File measure-acceptance.ps1 -Policy silent|resident|smart
 # 会结束正在运行的本程序。打开窗口通过再次启动 exe（单实例会唤起已有窗口）实现。
 param([string]$Policy = "silent", [int]$IdleSeconds = 60, [int]$Opens = 4)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $exe = Join-Path $PSScriptRoot "..\src-tauri\target\release\win11-volume-mixer.exe"
 $log = Join-Path $env:TEMP "volume-mixer-acceptance.log"
@@ -33,7 +34,7 @@ function Measure-Memory([int]$root, [string]$label) {
 
 $env:VOLUME_MIXER_WINDOW = $Policy
 $proc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden -RedirectStandardError $log
-Start-Sleep -Seconds 8
+Start-Sleep -Seconds 15
 "运行模式：$Policy"
 Measure-Memory $proc.Id "启动后（未打开窗口）"
 

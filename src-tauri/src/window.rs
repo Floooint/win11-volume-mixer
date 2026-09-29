@@ -3,8 +3,8 @@
 //! 隐藏后的行为由设置项 [`WindowPolicy`] 决定：常驻（保留界面）、静默（立即释放界面）、
 //! 智能（保留一段时间，超时未打开再释放）。
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::async_runtime::JoinHandle;
@@ -52,6 +52,9 @@ pub struct WindowState {
     resize: Generation,
     /// 设置页拖动宽度滑块时的预览宽度（逻辑像素），保存后清除。
     preview_width: Mutex<Option<u32>>,
+    /// 首次创建窗口时的“硬件加速”设置。WebView2 的启动参数只在浏览器进程创建时生效，
+    /// 且同一数据目录下参数必须一致，因此整个程序运行期间固定使用这个值，改设置后重启生效。
+    hardware_acceleration: OnceLock<bool>,
 }
 
 struct Pending {
@@ -195,6 +198,17 @@ fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(MAIN)
 }
 
+/// WebView2 启动参数。设置后会替换 wry 的默认参数，因此要把默认参数一并带上。
+fn browser_args(hardware_acceleration: bool) -> String {
+    // wry 的默认参数：去掉选中文字时的迷你菜单和 SmartScreen。
+    let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+    if !hardware_acceleration {
+        // GPU 进程从约 82 MB 降到约 14 MB，Mica 背景和动画不受影响。
+        args.push_str(" --disable-gpu");
+    }
+    args
+}
+
 /// 按 `tauri.conf.json` 中的配置创建主窗口（初始隐藏）。
 fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
     let config = app
@@ -204,7 +218,13 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .iter()
         .find(|w| w.label == MAIN)
         .expect("tauri.conf.json 中缺少主窗口配置");
-    let window = WebviewWindowBuilder::from_config(app, config)?.build()?;
+    let hardware_acceleration = *app
+        .state::<WindowState>()
+        .hardware_acceleration
+        .get_or_init(|| app.state::<Config>().get().hardware_acceleration);
+    let window = WebviewWindowBuilder::from_config(app, config)?
+        .additional_browser_args(&browser_args(hardware_acceleration))
+        .build()?;
     disable_system_transitions(&window);
     let _ = window.with_webview(|webview| crate::context_menu::install(&webview.controller()));
     Ok(window)
@@ -729,6 +749,13 @@ mod tests {
         width: 1920.0,
         height: 1080.0,
     };
+
+    #[test]
+    fn 关闭硬件加速时追加禁用_gpu_参数且保留默认参数() {
+        let default = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+        assert_eq!(browser_args(true), default);
+        assert_eq!(browser_args(false), format!("{default} --disable-gpu"));
+    }
 
     #[test]
     fn 高度随内容变化并有下限() {

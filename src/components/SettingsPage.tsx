@@ -102,6 +102,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const error = useSettingsStore((s) => s.error);
   const save = useSettingsStore((s) => s.save);
   const [refreshRate, setRefreshRate] = useState<number | null>(null);
+  /** 本次在设置页改过“硬件加速”，提示需要重启。 */
+  const [restartNeeded, setRestartNeeded] = useState(false);
   useEffect(() => {
     commands.getRefreshRate().then(setRefreshRate);
   }, []);
@@ -236,6 +238,27 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     />
                     帧
                   </span>
+                </SettingRow>
+                <SettingRow
+                  title="硬件加速"
+                  help="使用 GPU 渲染界面。关闭时窗口显示期间少占约 70 MB 内存，界面效果不变。重启程序后生效"
+                  isDefault={isDefault("hardwareAcceleration")}
+                  onReset={() => {
+                    setRestartNeeded(true);
+                    reset("hardwareAcceleration");
+                  }}
+                >
+                  {restartNeeded && (
+                    <span className="text-xs text-muted-foreground">重启后生效</span>
+                  )}
+                  <Switch
+                    label="硬件加速"
+                    checked={settings.hardwareAcceleration}
+                    onChange={(hardwareAcceleration) => {
+                      setRestartNeeded(true);
+                      save({ hardwareAcceleration });
+                    }}
+                  />
                 </SettingRow>
                 <SettingRow
                   title="调试工具"

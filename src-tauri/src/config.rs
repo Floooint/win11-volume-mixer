@@ -54,6 +54,9 @@ pub struct Settings {
     pub master_at_bottom: bool,
     /// 应用列表倒序：活跃应用排在底部，更靠近任务栏。
     pub apps_reversed: bool,
+    /// 界面使用 GPU 渲染。关闭时窗口显示期间少占约 70 MB 内存（实测见 docs/architecture.md），
+    /// 界面简单，软件渲染足够流畅。重启程序后生效。
+    pub hardware_acceleration: bool,
 }
 
 impl Default for Settings {
@@ -67,6 +70,7 @@ impl Default for Settings {
             window_width: DEFAULT_WIDTH,
             master_at_bottom: false,
             apps_reversed: false,
+            hardware_acceleration: false,
         }
     }
 }
@@ -171,6 +175,10 @@ mod tests {
         assert_eq!(settings.window_width, 340);
         assert!(!settings.master_at_bottom, "默认系统音量在上方");
         assert!(!settings.apps_reversed, "默认活跃应用在上方");
+        assert!(
+            !settings.hardware_acceleration,
+            "默认关闭硬件加速以节省内存"
+        );
     }
 
     #[test]
@@ -190,10 +198,11 @@ mod tests {
             window_width: 400,
             master_at_bottom: true,
             apps_reversed: true,
+            hardware_acceleration: true,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r#"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true}"#
+            r#"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true}"#
         );
     }
 
