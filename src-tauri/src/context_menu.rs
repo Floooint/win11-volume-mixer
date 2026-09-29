@@ -1,18 +1,19 @@
 //! 网页右键菜单（WebView2 原生菜单）：
 //! - 去掉对本程序没有意义的“返回”“共享”“另存为”“打印”；
 //! - “检查”只在设置中开启了调试工具时显示；
-//! - 在最前面加入“复制…”项（应用名、进程名、路径或点中的文字），内容由前端在右键时记下。
+//! - 在最前面加入前端给出的菜单项：复制（应用名、进程名、路径或点中的文字）和动作（置顶、隐藏等）。
 //!
-//! 前端的 `contextmenu` 监听先于本菜单执行，把可复制的内容写入 `window.__contextCopyItems`。
-//! 这里用 deferral 暂停菜单弹出，通过 `ExecuteScript` 读取这些内容后再补齐菜单项。
+//! 前端的 `contextmenu` 监听先于本菜单执行，把菜单项写入 `window.__contextMenuItems`。
+//! 这里用 deferral 暂停菜单弹出，通过 `ExecuteScript` 读取后再补齐菜单项。
+//! 复制由后端写入剪贴板；动作通过 `window.__contextMenuAction(action)` 交回前端执行。
 
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, Runtime};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
-    ICoreWebView2, ICoreWebView2_11, ICoreWebView2ContextMenuItemCollection,
-    ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Controller, ICoreWebView2Environment,
-    ICoreWebView2Environment9,
+    ICoreWebView2, ICoreWebView2_11, ICoreWebView2ContextMenuItem,
+    ICoreWebView2ContextMenuItemCollection, ICoreWebView2ContextMenuRequestedEventArgs,
+    ICoreWebView2Controller, ICoreWebView2Environment, ICoreWebView2Environment9,
 };
 use webview2_com::{
     ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, ExecuteScriptCompletedHandler,
@@ -27,11 +28,16 @@ const REMOVED: [&str; 4] = ["back", "share", "saveAs", "print"];
 /// 只在调试工具开启时保留。
 const DEBUG_ONLY: [&str; 1] = ["inspectElement"];
 
-/// 前端给出的一项可复制内容，如 `{ label: "应用名", value: "Google Chrome" }`。
-#[derive(Deserialize)]
-struct CopyItem {
+/// 前端给出的一项菜单，见 src/lib/context-menu.ts。
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct MenuEntry {
     label: String,
-    value: String,
+    /// 复制到剪贴板的内容。
+    value: Option<String>,
+    /// 交给前端执行的动作标识。
+    action: Option<String>,
+    separator: bool,
 }
 
 /// 在 WebView 创建后调用一次。
@@ -61,7 +67,7 @@ fn try_install<R: Runtime>(
         let debug = app.state::<Config>().get().debug_tools;
         remove_items(&items, debug)?;
         if let (Some(sender), Some(environment)) = (sender, &environment) {
-            add_copy_items(sender, args, items, environment.clone())?;
+            add_frontend_items(sender, args, items, environment.clone())?;
         }
         Ok(())
     }));
@@ -115,65 +121,121 @@ fn trim_separators(items: &ICoreWebView2ContextMenuItemCollection) -> windows_co
     Ok(())
 }
 
-/// 暂停菜单弹出，读取前端记下的可复制内容，插入到菜单最前面后再弹出。
-fn add_copy_items(
+/// 暂停菜单弹出，读取前端给出的菜单项，插入到菜单最前面后再弹出。
+fn add_frontend_items(
     webview: ICoreWebView2,
     args: ICoreWebView2ContextMenuRequestedEventArgs,
     items: ICoreWebView2ContextMenuItemCollection,
     environment: ICoreWebView2Environment9,
 ) -> windows_core::Result<()> {
     let deferral = unsafe { args.GetDeferral()? };
+    let target = webview.clone();
     let completed = ExecuteScriptCompletedHandler::create(Box::new(move |_, json| {
-        // 结果是 JSON；脚本出错或没有内容时为 "null" 等，按没有可复制内容处理。
-        let copy: Vec<CopyItem> = serde_json::from_str(&json).unwrap_or_default();
-        if let Err(e) = insert_copy_items(&items, &environment, copy) {
-            eprintln!("[context-menu] 无法添加复制菜单项：{e}");
+        // 结果是 JSON；脚本出错或没有内容时为 "null" 等，按没有菜单项处理。
+        let entries: Vec<MenuEntry> = serde_json::from_str(&json).unwrap_or_default();
+        if let Err(e) = insert_entries(&items, &environment, &target, entries) {
+            eprintln!("[context-menu] 无法添加菜单项：{e}");
         }
         unsafe { deferral.Complete() }
     }));
-    let script = HSTRING::from("window.__contextCopyItems ?? []");
+    let script = HSTRING::from("window.__contextMenuItems ?? []");
     unsafe { webview.ExecuteScript(&script, &completed) }
 }
 
-fn insert_copy_items(
+/// 去掉无效项，以及开头、结尾和连续的分隔线。
+fn clean_entries(entries: Vec<MenuEntry>) -> Vec<MenuEntry> {
+    let mut result: Vec<MenuEntry> = Vec::new();
+    for entry in entries {
+        let valid = if entry.separator {
+            result.last().is_some_and(|last| !last.separator)
+        } else {
+            entry.action.is_some() || entry.value.as_deref().is_some_and(|v| !v.is_empty())
+        };
+        if valid {
+            result.push(entry);
+        }
+    }
+    if result.last().is_some_and(|last| last.separator) {
+        result.pop();
+    }
+    result
+}
+
+fn insert_entries(
     items: &ICoreWebView2ContextMenuItemCollection,
     environment: &ICoreWebView2Environment9,
-    copy: Vec<CopyItem>,
+    webview: &ICoreWebView2,
+    entries: Vec<MenuEntry>,
 ) -> windows_core::Result<()> {
-    let copy: Vec<_> = copy.into_iter().filter(|c| !c.value.is_empty()).collect();
-    if copy.is_empty() {
+    let entries = clean_entries(entries);
+    if entries.is_empty() {
         return Ok(());
     }
     let mut count = 0u32;
     unsafe { items.Count(&mut count)? };
     if count > 0 {
-        let separator = unsafe {
-            environment.CreateContextMenuItem(
-                &HSTRING::new(),
-                None,
-                COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
-            )?
-        };
-        unsafe { items.InsertValueAtIndex(0, &separator)? };
+        unsafe { items.InsertValueAtIndex(0, &separator(environment)?)? };
     }
-    for (index, item) in copy.into_iter().enumerate() {
-        let entry = unsafe {
-            environment.CreateContextMenuItem(
-                &HSTRING::from(format!("复制{}", item.label)),
-                None,
-                COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
-            )?
+    for (index, entry) in entries.into_iter().enumerate() {
+        let item = if entry.separator {
+            separator(environment)?
+        } else {
+            command(environment, webview, entry)?
         };
-        let value = item.value;
-        let selected = CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
-            crate::clipboard::set_text(&value);
-            Ok(())
-        }));
-        let mut token = 0i64;
-        unsafe { entry.add_CustomItemSelected(&selected, &mut token)? };
-        unsafe { items.InsertValueAtIndex(index as u32, &entry)? };
+        unsafe { items.InsertValueAtIndex(index as u32, &item)? };
     }
     Ok(())
+}
+
+fn separator(
+    environment: &ICoreWebView2Environment9,
+) -> windows_core::Result<ICoreWebView2ContextMenuItem> {
+    unsafe {
+        environment.CreateContextMenuItem(
+            &HSTRING::new(),
+            None,
+            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
+        )
+    }
+}
+
+fn command(
+    environment: &ICoreWebView2Environment9,
+    webview: &ICoreWebView2,
+    entry: MenuEntry,
+) -> windows_core::Result<ICoreWebView2ContextMenuItem> {
+    let item = unsafe {
+        environment.CreateContextMenuItem(
+            &HSTRING::from(entry.label.as_str()),
+            None,
+            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
+        )?
+    };
+    let webview = webview.clone();
+    let selected = CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
+        if let Some(value) = &entry.value {
+            crate::clipboard::set_text(value);
+        }
+        if let Some(action) = &entry.action {
+            run_action(&webview, action);
+        }
+        Ok(())
+    }));
+    let mut token = 0i64;
+    unsafe { item.add_CustomItemSelected(&selected, &mut token)? };
+    Ok(item)
+}
+
+/// 把动作交回前端执行。动作标识经 JSON 编码后拼进脚本，不会被当作代码执行。
+fn run_action(webview: &ICoreWebView2, action: &str) {
+    let Ok(action) = serde_json::to_string(action) else {
+        return;
+    };
+    let script = HSTRING::from(format!("window.__contextMenuAction?.({action})"));
+    let done = ExecuteScriptCompletedHandler::create(Box::new(|_, _| Ok(())));
+    if let Err(e) = unsafe { webview.ExecuteScript(&script, &done) } {
+        eprintln!("[context-menu] 无法执行菜单动作：{e}");
+    }
 }
 
 #[cfg(test)]
@@ -195,11 +257,33 @@ mod tests {
     }
 
     #[test]
-    fn 前端内容解析失败时视为没有可复制内容() {
-        let parsed: Vec<CopyItem> = serde_json::from_str("null").unwrap_or_default();
+    fn 前端内容解析失败时视为没有菜单项() {
+        let parsed: Vec<MenuEntry> = serde_json::from_str("null").unwrap_or_default();
         assert!(parsed.is_empty());
-        let parsed: Vec<CopyItem> =
-            serde_json::from_str(r#"[{"label":"应用名","value":"Edge"}]"#).unwrap();
-        assert_eq!(parsed[0].label, "应用名");
+        let parsed: Vec<MenuEntry> =
+            serde_json::from_str(r#"[{"label":"复制应用名","value":"Edge"}]"#).unwrap();
+        assert_eq!(parsed[0].label, "复制应用名");
+        assert!(!parsed[0].separator);
+    }
+
+    #[test]
+    fn 清理多余的分隔线和空项() {
+        let parsed: Vec<MenuEntry> = serde_json::from_str(
+            r#"[{"separator":true},{"label":"复制","value":"a"},{"separator":true},
+                {"separator":true},{"label":"空","value":""},{"label":"置顶","action":"pin"},
+                {"separator":true}]"#,
+        )
+        .unwrap();
+        let labels: Vec<_> = clean_entries(parsed)
+            .into_iter()
+            .map(|e| {
+                if e.separator {
+                    "-".to_string()
+                } else {
+                    e.label
+                }
+            })
+            .collect();
+        assert_eq!(labels, ["复制", "-", "置顶"]);
     }
 }

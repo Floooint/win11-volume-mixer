@@ -47,6 +47,14 @@ pub enum ThemeMode {
     Dark,
 }
 
+/// 置顶或隐藏的应用。记下名称，应用没在运行时也能在设置页中显示。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedApp {
+    pub app_id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -71,6 +79,10 @@ pub struct Settings {
     pub theme: ThemeMode,
     /// 强调色 `#RRGGBB`；`None` 表示跟随 Windows 强调色。
     pub accent: Option<String>,
+    /// 置顶的应用，按显示顺序排列（可拖拽调整）。
+    pub pinned_apps: Vec<SavedApp>,
+    /// 隐藏的应用。
+    pub hidden_apps: Vec<SavedApp>,
 }
 
 impl Default for Settings {
@@ -87,6 +99,8 @@ impl Default for Settings {
             hardware_acceleration: false,
             theme: ThemeMode::System,
             accent: None,
+            pinned_apps: Vec::new(),
+            hidden_apps: Vec::new(),
         }
     }
 }
@@ -101,11 +115,21 @@ impl Settings {
             .animation_fps
             .map(|fps| fps.clamp(*FPS_RANGE.start(), *FPS_RANGE.end()));
         self.accent = self.accent.filter(|color| is_hex_color(color));
+        self.pinned_apps = saved_apps(self.pinned_apps);
+        self.hidden_apps = saved_apps(self.hidden_apps);
         self.window_width = self
             .window_width
             .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
         self
     }
+}
+
+/// 去重，并去掉以 PID 标识的应用：进程重启后 PID 会变，记住也没有意义。
+fn saved_apps(apps: Vec<SavedApp>) -> Vec<SavedApp> {
+    let mut seen = std::collections::HashSet::new();
+    apps.into_iter()
+        .filter(|app| !app.app_id.starts_with("pid:") && seen.insert(app.app_id.clone()))
+        .collect()
 }
 
 /// 是否为 `#RRGGBB` 格式，防止设置文件中的异常值被写进 CSS。
@@ -231,10 +255,12 @@ mod tests {
             hardware_acceleration: true,
             theme: ThemeMode::Dark,
             accent: Some("#744DA9".into()),
+            pinned_apps: Vec::new(),
+            hidden_apps: Vec::new(),
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9"}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[]}"##
         );
     }
 
@@ -264,6 +290,25 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(too_large.normalized().smart_release_seconds, 600);
+    }
+
+    #[test]
+    fn 置顶和隐藏的应用去重并忽略_pid_标识() {
+        let app = |id: &str| SavedApp {
+            app_id: id.into(),
+            name: id.into(),
+        };
+        let settings = Settings {
+            pinned_apps: vec![app("a"), app("pid:42"), app("b"), app("a")],
+            ..Settings::default()
+        }
+        .normalized();
+        let ids: Vec<_> = settings
+            .pinned_apps
+            .iter()
+            .map(|a| a.app_id.as_str())
+            .collect();
+        assert_eq!(ids, ["a", "b"]);
     }
 
     #[test]

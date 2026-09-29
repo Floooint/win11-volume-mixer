@@ -1,6 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Pin, Plus } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { GripVertical, Pin, Plus } from "lucide-react";
+import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import {
   type ReactNode,
   type Ref,
@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { type AppAudio, commands, type PinMode } from "@/bindings";
+import { type AppAudio, commands, type PinMode, type SavedApp } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Settings as SettingsIcon } from "@/components/animate-ui/icons/settings";
 import { Trash2 } from "@/components/animate-ui/icons/trash-2";
@@ -19,7 +19,7 @@ import { IconButton } from "@/components/IconButton";
 import { MainPageSkeleton, Skeleton } from "@/components/Skeleton";
 import { VolumeRow } from "@/components/VolumeRow";
 import { useFitWindowHeight } from "@/hooks/use-fit-window-height";
-import { copyData } from "@/lib/context-copy";
+import { menuData, onMenuAction } from "@/lib/context-menu";
 import { cn } from "@/lib/utils";
 import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
@@ -152,47 +152,82 @@ function ErrorToast() {
   );
 }
 
+const NO_APPS: SavedApp[] = [];
+
 /** 列表动画的时长与曲线，与窗口高度动画（animation.rs 的 RESIZE）一致。 */
 const LIST_TRANSITION = { duration: 0.18, ease: [0.33, 1, 0.68, 1] } as const;
+
+/** 能否置顶 / 隐藏：以 PID 标识的应用重启后标识会变，调试占位应用不写入设置。 */
+function canRemember(appId: string) {
+  return !appId.startsWith("pid:") && !appId.startsWith(DEBUG_APP_PREFIX);
+}
 
 /**
  * 一个应用。出现时淡入，退出时原地淡出（`popLayout` 下立即让出位置，列表高度只变化一次，
  * 由窗口高度动画过渡），排序变化时平滑移动到新位置。`ref` 由 `AnimatePresence` 使用。
+ * 置顶的应用可按住左侧手柄拖动排序（只从手柄开始拖动，不影响行内的音量滑块）。
  */
 function AppItem({
   app,
+  pinned,
   scrollAreaRef,
+  onDragEnd,
   ref,
 }: {
   app: AppAudio;
+  pinned: boolean;
   scrollAreaRef: RefObject<HTMLElement | null>;
+  onDragEnd?: () => void;
   ref?: Ref<HTMLLIElement>;
 }) {
   const setAppVolume = useAudioStore((s) => s.setAppVolume);
   const setAppMute = useAudioStore((s) => s.setAppMute);
   const debug = useDebugStore();
   const isDebug = app.appId.startsWith(DEBUG_APP_PREFIX);
+  const dragControls = useDragControls();
+  const remember = canRemember(app.appId);
 
-  return (
-    <motion.li
-      ref={ref}
-      // 只动画位置：用 transform 实现，不改变测得的内容高度。
-      layout="position"
-      initial={{ opacity: 0, scale: 0.97 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.97 }}
-      transition={LIST_TRANSITION}
-      data-copy={copyData([
-        { label: "应用名", value: app.name },
-        app.processName && { label: "进程名", value: app.processName },
-        app.exePath && { label: "路径", value: app.exePath },
-      ])}
-      className={cn(
-        "rounded-lg px-2 py-2 transition-colors",
-        // 正在发声：浅色底，一眼就能找到。
-        app.active ? "bg-primary/7 hover:bg-primary/11" : "hover:bg-accent/60",
+  const props = {
+    ref,
+    // 只动画位置：用 transform 实现，不改变测得的内容高度。
+    layout: "position" as const,
+    initial: { opacity: 0, scale: 0.97 },
+    animate: { opacity: 1, scale: 1 },
+    exit: { opacity: 0, scale: 0.97 },
+    transition: LIST_TRANSITION,
+    "data-menu": menuData([
+      { label: "复制应用名", value: app.name },
+      app.processName && { label: "复制进程名", value: app.processName },
+      app.exePath && { label: "复制路径", value: app.exePath },
+      remember && { separator: true },
+      remember &&
+        (pinned
+          ? { label: "取消置顶", action: `unpin:${app.appId}` }
+          : { label: "置顶", action: `pin:${app.appId}` }),
+      remember && { label: "隐藏", action: `hide:${app.appId}` },
+    ]),
+    className: cn(
+      "group relative rounded-lg px-2 py-2 transition-colors",
+      // 正在发声：浅色底，一眼就能找到。
+      app.active ? "bg-primary/7 hover:bg-primary/11" : "hover:bg-accent/60",
+    ),
+  };
+
+  const content = (
+    <>
+      {pinned && (
+        <span
+          aria-hidden
+          title="拖动排序"
+          onPointerDown={(e) => dragControls.start(e)}
+          className={cn(
+            "absolute top-1/2 left-0 flex h-8 w-2.5 -translate-y-1/2 cursor-grab touch-none items-center justify-center",
+            "text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing",
+          )}
+        >
+          <GripVertical size={12} />
+        </span>
       )}
-    >
       <VolumeRow
         name={app.name}
         detail={
@@ -205,22 +240,41 @@ function AppItem({
         leading={<AppAvatar key={app.icon ?? ""} app={app} />}
         scrollAreaRef={scrollAreaRef}
         trailing={
-          isDebug && (
-            <IconButton
-              label={`移除 ${app.name}`}
-              onClick={() => debug.remove(app.appId)}
-              className="size-6"
-            >
-              <Trash2 size={13} />
-            </IconButton>
-          )
+          <>
+            {pinned && (
+              <Pin size={11} aria-label="已置顶" className="text-muted-foreground/70" />
+            )}
+            {isDebug && (
+              <IconButton
+                label={`移除 ${app.name}`}
+                onClick={() => debug.remove(app.appId)}
+                className="size-6"
+              >
+                <Trash2 size={13} />
+              </IconButton>
+            )}
+          </>
         }
         onVolumeChange={(v) =>
           isDebug ? debug.setVolume(app.appId, v) : setAppVolume(app.appId, v)
         }
         onMuteChange={(m) => (isDebug ? debug.setMute(app.appId, m) : setAppMute(app.appId, m))}
       />
-    </motion.li>
+    </>
+  );
+
+  return pinned ? (
+    <Reorder.Item
+      {...props}
+      value={app.appId}
+      dragListener={false}
+      dragControls={dragControls}
+      onDragEnd={onDragEnd}
+    >
+      {content}
+    </Reorder.Item>
+  ) : (
+    <motion.li {...props}>{content}</motion.li>
   );
 }
 
@@ -241,7 +295,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const device = snapshot?.device;
   const masterSection = device && (
     <section
-      data-copy={copyData([{ label: "设备名", value: device.name }])}
+      data-menu={menuData([{ label: "复制设备名", value: device.name }])}
       className="mx-3 rounded-xl border border-border bg-card px-3 py-3"
     >
       <VolumeRow
@@ -254,9 +308,45 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
       />
     </section>
   );
-  const apps = [...(snapshot?.apps ?? []), ...(debugTools ? debugApps : [])];
-  // 倒序：正在播放的应用排在底部，更靠近任务栏。
-  if (appsReversed) apps.reverse();
+  const pinnedApps = useSettingsStore((s) => s.settings?.pinnedApps ?? NO_APPS);
+  const hiddenApps = useSettingsStore((s) => s.settings?.hiddenApps ?? NO_APPS);
+  const pinApp = useSettingsStore((s) => s.pinApp);
+  const unpinApp = useSettingsStore((s) => s.unpinApp);
+  const hideApp = useSettingsStore((s) => s.hideApp);
+  const reorderPinned = useSettingsStore((s) => s.reorderPinned);
+
+  // 隐藏的不显示；置顶的按设置中的顺序排在最前，其余按后端的默认顺序（活跃在前，再按名称）。
+  const hidden = new Set(hiddenApps.map((a) => a.appId));
+  const all = [...(snapshot?.apps ?? []), ...(debugTools ? debugApps : [])].filter(
+    (app) => !hidden.has(app.appId),
+  );
+  const pinnedIds = pinnedApps.map((a) => a.appId).filter((id) => all.some((a) => a.appId === id));
+  // 拖动期间使用本地顺序，松手后才保存，避免拖动过程中反复写设置文件。
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const pinnedOrder = dragOrder ?? pinnedIds;
+  const pinned = pinnedOrder.flatMap((id) => all.find((a) => a.appId === id) ?? []);
+  const others = all.filter((app) => !pinnedOrder.includes(app.appId));
+  // 倒序：整个列表反过来，置顶的和正在播放的都靠近底部（任务栏）。
+  const apps = appsReversed ? [...pinned, ...others].reverse() : [...pinned, ...others];
+  const displayedPinned = apps.filter((app) => pinnedOrder.includes(app.appId)).map((a) => a.appId);
+  const toSaved = (ids: string[]) => (appsReversed ? [...ids].reverse() : ids);
+
+  // 右键菜单中的“置顶 / 取消置顶 / 隐藏”。
+  const appsRef = useRef(all);
+  appsRef.current = all;
+  useEffect(
+    () =>
+      onMenuAction((action) => {
+        const [kind, ...rest] = action.split(":");
+        const appId = rest.join(":");
+        const app = appsRef.current.find((a) => a.appId === appId);
+        const saved = { appId, name: app?.name ?? appId };
+        if (kind === "pin") void pinApp(saved);
+        else if (kind === "unpin") void unpinApp(appId);
+        else if (kind === "hide") void hideApp(saved);
+      }),
+    [pinApp, unpinApp, hideApp],
+  );
 
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -342,14 +432,29 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
             />
           ) : (
             // 可滚动时滚轮用于滚动列表，不调节应用音量；系统音量不受影响。
-            <ul className="relative flex flex-col gap-1 pr-1 pl-3">
+            <Reorder.Group
+              as="ul"
+              axis="y"
+              values={displayedPinned}
+              onReorder={(ids) => setDragOrder(toSaved(ids))}
+              className="relative flex flex-col gap-1 pr-1 pl-3"
+            >
               {/* 首次显示不播放进入动画。 */}
               <AnimatePresence initial={false} mode="popLayout">
                 {apps.map((app) => (
-                  <AppItem key={app.appId} app={app} scrollAreaRef={scrollRef} />
+                  <AppItem
+                    key={app.appId}
+                    app={app}
+                    pinned={pinnedOrder.includes(app.appId)}
+                    scrollAreaRef={scrollRef}
+                    onDragEnd={() => {
+                      if (dragOrder) void reorderPinned(dragOrder);
+                      setDragOrder(null);
+                    }}
+                  />
                 ))}
               </AnimatePresence>
-            </ul>
+            </Reorder.Group>
           )}
         </div>
       </motion.div>

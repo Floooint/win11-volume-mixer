@@ -131,6 +131,12 @@ export type PinMode =
 /**  定住并置顶：失焦不隐藏，始终在最前。 */
 "pinnedOnTop";
 
+/**  置顶或隐藏的应用。记下名称，应用没在运行时也能在设置页中显示。 */
+export type SavedApp = {
+	appId: string,
+	name: string,
+};
+
 export type Settings = Settings_Serialize | Settings_Deserialize;
 
 export type Settings_Deserialize = {
@@ -157,6 +163,10 @@ export type Settings_Deserialize = {
 	theme?: ThemeMode,
 	/**  强调色 `#RRGGBB`；`None` 表示跟随 Windows 强调色。 */
 	accent?: string | null,
+	/**  置顶的应用，按显示顺序排列（可拖拽调整）。 */
+	pinnedApps?: SavedApp[],
+	/**  隐藏的应用。 */
+	hiddenApps?: SavedApp[],
 };
 
 export type Settings_Serialize = {
@@ -183,6 +193,10 @@ export type Settings_Serialize = {
 	theme: ThemeMode,
 	/**  强调色 `#RRGGBB`；`None` 表示跟随 Windows 强调色。 */
 	accent: string | null,
+	/**  置顶的应用，按显示顺序排列（可拖拽调整）。 */
+	pinnedApps: SavedApp[],
+	/**  隐藏的应用。 */
+	hiddenApps: SavedApp[],
 };
 
 /**  界面深浅色。 */

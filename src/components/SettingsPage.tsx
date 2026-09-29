@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   commands,
+  type SavedApp,
   type ThemeMode,
   type WindowPolicy_Serialize as WindowPolicy,
 } from "@/bindings";
@@ -178,6 +179,41 @@ function AutostartSetting() {
   );
 }
 
+/** 已置顶或已隐藏的应用列表，每项右侧一个取消按钮。列表为空时显示提示。 */
+function SavedAppList({
+  apps,
+  empty,
+  actionLabel,
+  onAction,
+}: {
+  apps: SavedApp[];
+  empty: string;
+  actionLabel: string;
+  onAction: (appId: string) => void;
+}) {
+  if (apps.length === 0) {
+    return <p className="text-xs text-muted-foreground">{empty}</p>;
+  }
+  return (
+    <ul className="flex flex-col">
+      {apps.map((app) => (
+        <li key={app.appId} className="flex items-center justify-between gap-2 py-0.5">
+          <span className="truncate" title={app.appId}>
+            {app.name}
+          </span>
+          <button
+            type="button"
+            onClick={() => onAction(app.appId)}
+            className="shrink-0 rounded-md px-2 py-0.5 text-xs text-primary hover:bg-accent"
+          >
+            {actionLabel}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
@@ -194,6 +230,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const defaults = useSettingsStore((s) => s.defaults);
   const error = useSettingsStore((s) => s.error);
   const save = useSettingsStore((s) => s.save);
+  const unpinApp = useSettingsStore((s) => s.unpinApp);
+  const unhideApp = useSettingsStore((s) => s.unhideApp);
   const [refreshRate, setRefreshRate] = useState<number | null>(null);
   /** 本次在设置页改过“硬件加速”，提示需要重启。 */
   const [restartNeeded, setRestartNeeded] = useState(false);
@@ -319,6 +357,33 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     onChange={(appsReversed) => save({ appsReversed })}
                   />
                 </SettingRow>
+              </Section>
+
+              <Section title="应用">
+                <SettingRow
+                  title="置顶的应用"
+                  help="在主界面右键应用选择“置顶”。置顶的应用排在最前，可拖动左侧手柄调整顺序"
+                  below={
+                    <SavedAppList
+                      apps={settings.pinnedApps}
+                      empty="还没有置顶的应用"
+                      actionLabel="取消置顶"
+                      onAction={(appId) => void unpinApp(appId)}
+                    />
+                  }
+                />
+                <SettingRow
+                  title="隐藏的应用"
+                  help="在主界面右键应用选择“隐藏”。隐藏的应用不在列表中显示，音量不受影响"
+                  below={
+                    <SavedAppList
+                      apps={settings.hiddenApps}
+                      empty="没有隐藏的应用"
+                      actionLabel="取消隐藏"
+                      onAction={(appId) => void unhideApp(appId)}
+                    />
+                  }
+                />
               </Section>
 
               <Section title="其他">

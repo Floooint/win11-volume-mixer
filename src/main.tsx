@@ -2,10 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { commands } from "./bindings";
-import { installContextCopy } from "./lib/context-copy";
+import { installContextMenu } from "./lib/context-menu";
 import "./index.css";
 
-installContextCopy();
+installContextMenu();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
