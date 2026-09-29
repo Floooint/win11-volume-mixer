@@ -33,6 +33,7 @@ import { Trash2 } from "@/components/animate-ui/icons/trash-2";
 import { VolumeOff } from "@/components/animate-ui/icons/volume-off";
 import { AppAvatar } from "@/components/AppAvatar";
 import { IconButton } from "@/components/IconButton";
+import { Tooltip } from "@/components/Tooltip";
 import { MainPageSkeleton } from "@/components/Skeleton";
 import { VolumeRow } from "@/components/VolumeRow";
 import { type DragState, type DropTarget, sameTarget, useAppDrag } from "@/hooks/use-app-drag";
@@ -282,18 +283,19 @@ function AppItem({
       )}
     >
       {remember && (
-        <span
-          aria-hidden
-          title="拖动到置顶区或分组"
-          data-no-details
-          onPointerDown={onDragStart}
-          className={cn(
-            "absolute top-1/2 left-0 flex h-8 w-2.5 -translate-y-1/2 cursor-grab touch-none items-center justify-center",
-            "text-muted-foreground/60 opacity-0 transition-opacity group-hover/app:opacity-100",
-          )}
-        >
-          <GripVertical size={12} />
-        </span>
+        <Tooltip content="拖动到置顶区或分组">
+          <span
+            aria-hidden
+            data-no-details
+            onPointerDown={onDragStart}
+            className={cn(
+              "absolute top-1/2 left-0 flex h-8 w-2.5 -translate-y-1/2 cursor-grab touch-none items-center justify-center",
+              "text-muted-foreground/60 opacity-0 transition-opacity group-hover/app:opacity-100",
+            )}
+          >
+            <GripVertical size={12} />
+          </span>
+        </Tooltip>
       )}
       {renaming && (
         <RenameField
@@ -316,14 +318,15 @@ function AppItem({
         leading={
           remember ? (
             // 图标也可以按住拖动，与左侧的拖动手柄相同。
-            <span
-              onPointerDown={onDragStart}
-              title="拖动到置顶区或分组"
-              data-no-details
-              className="block cursor-grab touch-none active:cursor-grabbing"
-            >
-              <AppAvatar key={app.icon ?? ""} app={app} />
-            </span>
+            <Tooltip content="拖动到置顶区或分组">
+              <span
+                onPointerDown={onDragStart}
+                data-no-details
+                className="block cursor-grab touch-none active:cursor-grabbing"
+              >
+                <AppAvatar key={app.icon ?? ""} app={app} />
+              </span>
+            </Tooltip>
           ) : (
             <AppAvatar key={app.icon ?? ""} app={app} />
           )
@@ -488,7 +491,12 @@ function GroupItem({
           void updateGroup(group.id, { volume });
           setDragVolume(null);
         }}
-        onMuteChange={(m) => setGroupMute(running.map((a) => a.appId), m)}
+        onMuteChange={(m) =>
+          setGroupMute(
+            running.map((a) => a.appId),
+            m,
+          )
+        }
       />
       {/* 展开 / 折叠：高度从 0 到自然高度，下面的行随之平滑移动，不会与展开的内容重叠。 */}
       <AnimatePresence initial={false}>
@@ -635,30 +643,33 @@ function ScenesBar({
           .join("\n");
         return (
           // 不用 disabled：禁用的按钮收不到右键，就无法删除应用都没在运行的场景。
-          <button
+          <Tooltip
             key={scene.id}
-            type="button"
-            aria-pressed={current}
-            aria-disabled={running === 0}
-            title={running === 0 ? `${summary}\n\n场景中的应用都没在运行` : summary}
-            onClick={() => running > 0 && onApply(scene)}
-            data-menu={menuData([
-              { label: "用当前音量覆盖", action: `scene-overwrite:${scene.id}` },
-              { label: "重命名", action: `scene-rename:${scene.id}` },
-              { separator: true },
-              { label: "删除场景", action: `scene-delete:${scene.id}` },
-            ])}
-            className={cn(
-              "h-7 max-w-40 truncate rounded-full border px-3 text-xs transition-colors",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-              current
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card hover:bg-accent",
-              running === 0 && "opacity-50",
-            )}
+            content={running === 0 ? `${summary}\n\n场景中的应用都没在运行` : summary}
           >
-            {scene.name}
-          </button>
+            <button
+              type="button"
+              aria-pressed={current}
+              aria-disabled={running === 0}
+              onClick={() => running > 0 && onApply(scene)}
+              data-menu={menuData([
+                { label: "用当前音量覆盖", action: `scene-overwrite:${scene.id}` },
+                { label: "重命名", action: `scene-rename:${scene.id}` },
+                { separator: true },
+                { label: "删除场景", action: `scene-delete:${scene.id}` },
+              ])}
+              className={cn(
+                "h-7 max-w-40 truncate rounded-full border px-3 text-xs transition-colors",
+                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                current
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card hover:bg-accent",
+                running === 0 && "opacity-50",
+              )}
+            >
+              {scene.name}
+            </button>
+          </Tooltip>
         );
       })}
     </div>
@@ -782,8 +793,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     group.apps.flatMap((m) => all.find((a) => a.appId === m.appId) ?? []);
 
   type Entry =
-    | { kind: "app"; app: AppAudio; placement: Placement }
-    | { kind: "group"; group: AppGroup };
+    { kind: "app"; app: AppAudio; placement: Placement } | { kind: "group"; group: AppGroup };
   const entries: Entry[] = [
     ...pinned.map((app): Entry => ({ kind: "app", app, placement: { kind: "pinned" } })),
     ...groups.map((group): Entry => ({ kind: "group", group })),

@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type AppDetails, commands, events } from "@/bindings";
 import { AppAvatar } from "@/components/AppAvatar";
+import { Tooltip } from "@/components/Tooltip";
 import { useApplyAccent, useSystemAccent } from "@/lib/accent";
 import { menuData, onMenuAction } from "@/lib/context-menu";
 import { cn } from "@/lib/utils";
@@ -25,22 +26,23 @@ function Field({ label, children, mono }: { label: string; children: ReactNode; 
 /** 路径：点击在资源管理器中打开所在文件夹并选中该文件（不打开文件本身）。 */
 function PathLink({ path }: { path: string }) {
   return (
-    <a
-      href="#"
-      draggable={false}
-      title="打开所在文件夹"
-      data-menu={menuData([
-        { label: "复制路径", value: path },
-        { label: "打开所在文件夹", action: "reveal" },
-      ])}
-      onClick={(e) => {
-        e.preventDefault();
-        void commands.revealInFolder(path);
-      }}
-      className="text-primary underline-offset-2 select-text hover:underline"
-    >
-      {path}
-    </a>
+    <Tooltip content="打开所在文件夹">
+      <a
+        href="#"
+        draggable={false}
+        data-menu={menuData([
+          { label: "复制路径", value: path },
+          { label: "打开所在文件夹", action: "reveal" },
+        ])}
+        onClick={(e) => {
+          e.preventDefault();
+          void commands.revealInFolder(path);
+        }}
+        className="text-primary underline-offset-2 select-text hover:underline"
+      >
+        {path}
+      </a>
+    </Tooltip>
   );
 }
 
@@ -78,8 +80,8 @@ export function DetailsView() {
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!details || !content) return;
-    const frame = requestAnimationFrame(() =>
-      void commands.detailsReady(Math.ceil(content.getBoundingClientRect().height)),
+    const frame = requestAnimationFrame(
+      () => void commands.detailsReady(Math.ceil(content.getBoundingClientRect().height)),
     );
     return () => cancelAnimationFrame(frame);
   }, [details]);
@@ -88,17 +90,12 @@ export function DetailsView() {
   const { app, alias } = details;
   const percent = Math.round(app.volume.volume * 100);
   return (
-    <div
-      ref={contentRef}
-      className="flex flex-col gap-3 p-3 text-xs"
-    >
+    <div ref={contentRef} className="flex flex-col gap-3 p-3 text-xs">
       <div className="flex items-center gap-3">
         <AppAvatar key={app.icon ?? ""} app={app} />
         <div className="min-w-0">
           <p className="break-all text-sm font-semibold select-text">{alias ?? app.name}</p>
-          {alias && (
-            <p className="break-all text-muted-foreground select-text">原名：{app.name}</p>
-          )}
+          {alias && <p className="break-all text-muted-foreground select-text">原名：{app.name}</p>}
         </div>
       </div>
       <dl className="flex flex-col gap-1.5">

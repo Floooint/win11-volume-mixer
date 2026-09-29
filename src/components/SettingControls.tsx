@@ -1,46 +1,31 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import * as SliderPrimitive from "@radix-ui/react-slider";
-import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Check, ChevronDown } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { RotateCcw } from "@/components/animate-ui/icons/rotate-ccw";
 import { IconButton } from "@/components/IconButton";
+import { Tooltip } from "@/components/Tooltip";
 import { ignoreNonPrimary } from "@/components/VolumeSlider";
 import { cn } from "@/lib/utils";
 
-/** 标题右上角的问号，悬停或聚焦时显示说明。需要外层有 `TooltipPrimitive.Provider`（见 App）。 */
+/** 标题右上角的问号，悬停或聚焦时显示说明。 */
 function Help({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <TooltipPrimitive.Root>
-      <TooltipPrimitive.Trigger asChild>
-        <button
-          type="button"
-          aria-label={`${label}说明`}
-          className={cn(
-            // 上标样式的问号，颜色较浅，不抢标题的注意力；悬停时加深。
-            "-mt-1 inline-flex size-3.5 items-center justify-center rounded-sm",
-            "text-[11px] leading-none font-semibold text-muted-foreground/50",
-            "transition-colors hover:text-muted-foreground",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          )}
-        >
-          ?
-        </button>
-      </TooltipPrimitive.Trigger>
-      <TooltipPrimitive.Portal>
-        <TooltipPrimitive.Content
-          side="top"
-          sideOffset={4}
-          collisionPadding={8}
-          className={cn(
-            "z-50 max-w-[min(18rem,calc(100vw-16px))] rounded-md border border-border bg-popover px-2.5 py-1.5",
-            "text-xs text-popover-foreground shadow-md animate-pop-in",
-          )}
-        >
-          {children}
-        </TooltipPrimitive.Content>
-      </TooltipPrimitive.Portal>
-    </TooltipPrimitive.Root>
+    <Tooltip content={children}>
+      <button
+        type="button"
+        aria-label={`${label}说明`}
+        className={cn(
+          // 上标样式的问号，颜色较浅，不抢标题的注意力；悬停时加深。
+          "-mt-1 inline-flex size-3.5 items-center justify-center rounded-sm",
+          "text-[11px] leading-none font-semibold text-muted-foreground/50",
+          "transition-colors hover:text-muted-foreground",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        )}
+      >
+        ?
+      </button>
+    </Tooltip>
   );
 }
 

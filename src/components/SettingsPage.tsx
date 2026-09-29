@@ -9,6 +9,7 @@ import {
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
 import { ColorPicker, CustomSwatch } from "@/components/ColorPicker";
 import { IconButton } from "@/components/IconButton";
+import { Tooltip } from "@/components/Tooltip";
 import {
   NumberInput,
   Select,
@@ -65,28 +66,28 @@ function AccentPicker({
       {swatches.map((swatch) => {
         const selected = value === swatch.value;
         return (
-          <button
-            key={swatch.label}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            aria-label={swatch.label}
-            title={swatch.label}
-            onClick={() => onChange(swatch.value)}
-            style={{ backgroundColor: swatch.color }}
-            className={cn(
-              "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
-            )}
-          >
-            {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
-            {swatch.value === null && (
-              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
-                A
-              </span>
-            )}
-          </button>
+          <Tooltip key={swatch.label} content={swatch.label}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={swatch.label}
+              onClick={() => onChange(swatch.value)}
+              style={{ backgroundColor: swatch.color }}
+              className={cn(
+                "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+              )}
+            >
+              {/* “跟随系统”用字母 A 标出（Auto），与预设色区分。 */}
+              {swatch.value === null && (
+                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+                  A
+                </span>
+              )}
+            </button>
+          </Tooltip>
         );
       })}
     </div>
@@ -185,35 +186,33 @@ function TrayColorPicker({
         {TRAY_COLORS.map((swatch) => {
           const selected = value === swatch.value;
           return (
-            <button
-              key={swatch.label}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              aria-label={swatch.label}
-              title={swatch.label}
-              onClick={() => {
-                setOpen(false);
-                onChange(swatch.value);
-              }}
-              style={{
-                background:
-                  swatch.value ?? "linear-gradient(135deg, #FFFFFF 0 50%, #1C1C1C 50% 100%)",
-              }}
-              className={cn(
-                "relative size-6 rounded-full border border-border ring-offset-2 ring-offset-card transition-shadow",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
-              )}
-            />
+            <Tooltip key={swatch.label} content={swatch.label}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                aria-label={swatch.label}
+                onClick={() => {
+                  setOpen(false);
+                  onChange(swatch.value);
+                }}
+                style={{
+                  background:
+                    swatch.value ?? "linear-gradient(135deg, #FFFFFF 0 50%, #1C1C1C 50% 100%)",
+                }}
+                className={cn(
+                  "relative size-6 rounded-full border border-border ring-offset-2 ring-offset-card transition-shadow",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+                )}
+              />
+            </Tooltip>
           );
         })}
         <CustomSwatch selected={custom} open={open} color={value} onClick={() => setOpen(!open)} />
       </div>
       {/* 托盘图标在保存后才重绘；拖动期间只更新下方的预览。 */}
-      {open && (
-        <ColorPicker value={value ?? "#FFFFFF"} onPreview={onPreview} onChange={onChange} />
-      )}
+      {open && <ColorPicker value={value ?? "#FFFFFF"} onPreview={onPreview} onChange={onChange} />}
     </>
   );
 }
@@ -325,9 +324,9 @@ function SavedAppList({
     <ul className="flex flex-col">
       {apps.map((app) => (
         <li key={app.appId} className="flex items-center justify-between gap-2 py-0.5">
-          <span className="truncate" title={app.appId}>
-            {app.name}
-          </span>
+          <Tooltip content={app.appId}>
+            <span className="truncate">{app.name}</span>
+          </Tooltip>
           <button
             type="button"
             onClick={() => onAction(app.appId)}
@@ -458,10 +457,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   isDefault={isDefault("accent")}
                   onReset={() => reset("accent")}
                   below={
-                    <AccentPicker
-                      value={settings.accent}
-                      onChange={(accent) => save({ accent })}
-                    />
+                    <AccentPicker value={settings.accent} onChange={(accent) => save({ accent })} />
                   }
                 />
                 <WidthSetting
@@ -717,7 +713,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   />
                 </SettingRow>
               </Section>
-
             </>
           )}
           {error && <p className="mt-2 px-4 text-xs text-destructive">{error}</p>}

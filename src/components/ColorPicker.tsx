@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { Tooltip } from "@/components/Tooltip";
 
 /** HSV（h: 0–360，s、v: 0–1）。 */
 type Hsv = { h: number; s: number; v: number };
@@ -184,29 +185,30 @@ export function CustomSwatch({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      aria-expanded={open}
-      aria-label="自定义颜色"
-      title="自定义颜色"
-      onClick={onClick}
-      style={{
-        background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)",
-      }}
-      className={cn(
-        "relative flex size-6 items-center justify-center rounded-full ring-offset-2 ring-offset-card transition-shadow",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        selected || open ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
-      )}
-    >
-      {selected && color && (
-        <span
-          className="size-3 rounded-full border border-white/80"
-          style={{ backgroundColor: color }}
-        />
-      )}
-    </button>
+    <Tooltip content="自定义颜色">
+      <button
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        aria-expanded={open}
+        aria-label="自定义颜色"
+        onClick={onClick}
+        style={{
+          background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)",
+        }}
+        className={cn(
+          "relative flex size-6 items-center justify-center rounded-full ring-offset-2 ring-offset-card transition-shadow",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          selected || open ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
+        )}
+      >
+        {selected && color && (
+          <span
+            className="size-3 rounded-full border border-white/80"
+            style={{ backgroundColor: color }}
+          />
+        )}
+      </button>
+    </Tooltip>
   );
 }

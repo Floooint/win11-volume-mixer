@@ -2,6 +2,7 @@ import { type ReactNode, type RefObject, useRef, useState } from "react";
 import type { VolumeState } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { IconButton } from "@/components/IconButton";
+import { Tooltip } from "@/components/Tooltip";
 import { VolumeIcon } from "@/components/VolumeIcon";
 import { VolumeSlider } from "@/components/VolumeSlider";
 import { cn } from "@/lib/utils";
@@ -87,24 +88,27 @@ function VolumeValue({
     );
   }
   return (
-    <button
-      type="button"
-      title="点击输入音量"
-      aria-label={volume.muted ? `${name} 已静音，点击输入音量` : `${name} 音量 ${percent}%，点击输入`}
-      onClick={() => {
-        cancelled.current = false;
-        setDraft(String(percent));
-      }}
-      className={cn(
-        "rounded px-1 text-xs tabular-nums text-muted-foreground transition-opacity",
-        "hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        // 静音提示始终可见；数字只在悬停或焦点在行内时显示（仍占位，显示时不跳动）。
-        !volume.muted &&
-          "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100",
-      )}
-    >
-      {volume.muted ? "静音" : `${percent}%`}
-    </button>
+    <Tooltip content="点击输入音量">
+      <button
+        type="button"
+        aria-label={
+          volume.muted ? `${name} 已静音，点击输入音量` : `${name} 音量 ${percent}%，点击输入`
+        }
+        onClick={() => {
+          cancelled.current = false;
+          setDraft(String(percent));
+        }}
+        className={cn(
+          "rounded px-1 text-xs tabular-nums text-muted-foreground transition-opacity",
+          "hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          // 静音提示始终可见；数字只在悬停或焦点在行内时显示（仍占位，显示时不跳动）。
+          !volume.muted &&
+            "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100",
+        )}
+      >
+        {volume.muted ? "静音" : `${percent}%`}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -145,16 +149,18 @@ export function VolumeRow({
                 className="shrink-0 text-primary"
               />
             )}
-            <p
-              className={cn(
-                "truncate text-sm transition-colors",
-                active ? "font-semibold text-foreground" : "font-medium",
-                inactive && "text-muted-foreground",
-              )}
-              title={name}
-            >
-              {name}
-            </p>
+            {/* 名称被截断时悬停显示全名。 */}
+            <Tooltip content={name} onlyWhenTruncated>
+              <p
+                className={cn(
+                  "truncate text-sm transition-colors",
+                  active ? "font-semibold text-foreground" : "font-medium",
+                  inactive && "text-muted-foreground",
+                )}
+              >
+                {name}
+              </p>
+            </Tooltip>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <VolumeValue
