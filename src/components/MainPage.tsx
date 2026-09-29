@@ -1,5 +1,13 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { ChevronRight, FolderClosed, FolderPlus, GripVertical, Pin, Plus } from "lucide-react";
+import {
+  BookmarkPlus,
+  ChevronRight,
+  FolderClosed,
+  FolderPlus,
+  GripVertical,
+  Pin,
+  Plus,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   type ReactNode,
@@ -17,6 +25,8 @@ import {
   commands,
   type PinMode,
   type SavedApp,
+  type Scene,
+  type SceneApp,
 } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Settings as SettingsIcon } from "@/components/animate-ui/icons/settings";
@@ -210,6 +220,7 @@ function ErrorToast() {
 const NO_APPS: SavedApp[] = [];
 const NO_GROUPS: AppGroup[] = [];
 const NO_ALIASES: AppAlias[] = [];
+const NO_SCENES: Scene[] = [];
 
 /** 列表动画的时长与曲线，与窗口高度动画（animation.rs 的 RESIZE）一致。 */
 const LIST_TRANSITION = { duration: 0.18, ease: [0.33, 1, 0.68, 1] } as const;
@@ -561,8 +572,96 @@ function DragBadge({ drag }: { drag: DragState }) {
   );
 }
 
-/** 正在重命名的分组或应用。 */
-type Renaming = { kind: "group" | "app"; id: string };
+/** 正在重命名的分组、应用或场景。 */
+type Renaming = { kind: "group" | "app" | "scene"; id: string };
+
+/** 场景中正在运行的应用，音量都与场景一致时视为“当前场景”。音量按百分比取整比较。 */
+function sceneState(scene: Scene, apps: AppAudio[]): { running: number; current: boolean } {
+  let running = 0;
+  let current = true;
+  for (const saved of scene.apps) {
+    const app = apps.find((a) => a.appId === saved.appId);
+    if (!app) continue;
+    running++;
+    const same =
+      Math.round(app.volume.volume * 100) === Math.round(saved.volume * 100) &&
+      app.volume.muted === saved.muted;
+    if (!same) current = false;
+  }
+  return { running, current: running > 0 && current };
+}
+
+/**
+ * 场景栏：每个场景一个按钮，点击即把场景中正在运行的应用调到保存的音量。
+ * 与当前音量一致的场景高亮；场景中的应用都没在运行时按钮变灰。右键可覆盖、重命名、删除。
+ */
+function ScenesBar({
+  scenes,
+  apps,
+  aliases,
+  renaming,
+  onRenameDone,
+  onApply,
+}: {
+  scenes: Scene[];
+  apps: AppAudio[];
+  aliases: Map<string, string>;
+  renaming: Renaming | null;
+  onRenameDone: (name: string | null) => void;
+  onApply: (scene: Scene) => void;
+}) {
+  return (
+    <div role="toolbar" aria-label="音量场景" className="flex flex-wrap gap-1.5 px-3 pb-2">
+      {scenes.map((scene) => {
+        if (renaming?.kind === "scene" && renaming.id === scene.id) {
+          return (
+            <RenameField
+              key={scene.id}
+              label="场景名称"
+              initial={scene.name}
+              onDone={onRenameDone}
+              className="h-7 w-32 py-0 text-xs"
+            />
+          );
+        }
+        const { running, current } = sceneState(scene, apps);
+        const summary = scene.apps
+          .map((a) => {
+            const volume = a.muted ? "静音" : `${Math.round(a.volume * 100)}%`;
+            return `${aliases.get(a.appId) ?? a.name}：${volume}`;
+          })
+          .join("\n");
+        return (
+          // 不用 disabled：禁用的按钮收不到右键，就无法删除应用都没在运行的场景。
+          <button
+            key={scene.id}
+            type="button"
+            aria-pressed={current}
+            aria-disabled={running === 0}
+            title={running === 0 ? `${summary}\n\n场景中的应用都没在运行` : summary}
+            onClick={() => running > 0 && onApply(scene)}
+            data-menu={menuData([
+              { label: "用当前音量覆盖", action: `scene-overwrite:${scene.id}` },
+              { label: "重命名", action: `scene-rename:${scene.id}` },
+              { separator: true },
+              { label: "删除场景", action: `scene-delete:${scene.id}` },
+            ])}
+            className={cn(
+              "h-7 max-w-40 truncate rounded-full border px-3 text-xs transition-colors",
+              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              current
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card hover:bg-accent",
+              running === 0 && "opacity-50",
+            )}
+          >
+            {scene.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 /** 与后端 `config::MAX_ALIAS_CHARS` 一致。 */
 const MAX_NAME_CHARS = 40;
@@ -658,6 +757,13 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const renameApp = useSettingsStore((s) => s.renameApp);
   const appAliases = useSettingsStore((s) => s.settings?.appAliases ?? NO_ALIASES);
   const aliases = new Map(appAliases.map((a) => [a.appId, a.alias]));
+  const scenes = useSettingsStore((s) => s.settings?.scenes ?? NO_SCENES);
+  const createScene = useSettingsStore((s) => s.createScene);
+  const updateScene = useSettingsStore((s) => s.updateScene);
+  const deleteScene = useSettingsStore((s) => s.deleteScene);
+  const syncGroupMembers = useSettingsStore((s) => s.syncGroupMembers);
+  const setAppVolume = useAudioStore((s) => s.setAppVolume);
+  const setAppMute = useAudioStore((s) => s.setAppMute);
 
   // 列表由三部分组成：置顶的应用、分组、其余应用（后端顺序：活跃在前，再按名称）。隐藏的不显示。
   const hidden = new Set(hiddenApps.map((a) => a.appId));
@@ -688,6 +794,31 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const savedOf = (appId: string): SavedApp => ({ appId, name: findApp(appId)?.name ?? appId });
   const volumeOf = (appId: string) => findApp(appId)?.volume.volume ?? 1;
 
+  /** 列表中可记住的应用（不含以 PID 标识的和调试占位应用）的当前音量，保存为场景。 */
+  const captureScene = (): SceneApp[] =>
+    all
+      .filter((a) => canRemember(a.appId))
+      .map((a) => ({
+        appId: a.appId,
+        name: a.name,
+        volume: a.volume.volume,
+        muted: a.volume.muted,
+      }));
+  /** 应用场景：只调节正在运行的应用，分组成员同时更新它在组音量 100% 时的音量。 */
+  const applyScene = (scene: Scene) => {
+    const changed: [string, number][] = [];
+    for (const saved of scene.apps) {
+      const app = findApp(saved.appId);
+      if (!app) continue;
+      if (Math.round(app.volume.volume * 100) !== Math.round(saved.volume * 100)) {
+        setAppVolume(saved.appId, saved.volume);
+      }
+      if (app.volume.muted !== saved.muted) setAppMute(saved.appId, saved.muted);
+      changed.push([saved.appId, saved.volume]);
+    }
+    void syncGroupMembers(changed);
+  };
+
   /** 应用放到某个位置：置顶区、分组或普通区域。 */
   const moveTo = (appId: string, target: DropTarget) => {
     const inGroup = groups.some((g) => g.apps.some((m) => m.appId === appId));
@@ -708,18 +839,20 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     if (!target || name === null) return;
     if (target.kind === "group") {
       if (name) void updateGroup(target.id, { name });
+    } else if (target.kind === "scene") {
+      if (name) void updateScene(target.id, { name });
     } else {
       void renameApp(savedOf(target.id), name || null);
     }
   };
 
   // 右键菜单中的动作。回调在菜单关闭后才执行，通过 ref 读取最新状态。
-  const latest = useRef({ moveTo, groups, savedOf, volumeOf });
-  latest.current = { moveTo, groups, savedOf, volumeOf };
+  const latest = useRef({ moveTo, groups, savedOf, volumeOf, captureScene });
+  latest.current = { moveTo, groups, savedOf, volumeOf, captureScene };
   useEffect(
     () =>
       onMenuAction((action) => {
-        const { moveTo, groups, savedOf, volumeOf } = latest.current;
+        const { moveTo, groups, savedOf, volumeOf, captureScene } = latest.current;
         const [kind, ...rest] = action.split(":");
         const arg = rest.join(":");
         switch (kind) {
@@ -758,12 +891,30 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           case "reset-name":
             void renameApp(savedOf(arg), null);
             break;
+          case "scene-overwrite":
+            void updateScene(arg, { apps: captureScene() });
+            break;
+          case "scene-rename":
+            setRenaming({ kind: "scene", id: arg });
+            break;
+          case "scene-delete":
+            void deleteScene(arg);
+            break;
           case "delete-group":
             void deleteGroup(arg);
             break;
         }
       }),
-    [hideApp, createGroup, addToGroup, updateGroup, deleteGroup, renameApp],
+    [
+      hideApp,
+      createGroup,
+      addToGroup,
+      updateGroup,
+      deleteGroup,
+      renameApp,
+      updateScene,
+      deleteScene,
+    ],
   );
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -795,6 +946,15 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
               </IconButton>
             </>
           )}
+          <IconButton
+            label="把当前音量保存为场景"
+            disabled={!all.some((a) => canRemember(a.appId))}
+            onClick={() =>
+              void createScene(captureScene()).then((id) => setRenaming({ kind: "scene", id }))
+            }
+          >
+            <BookmarkPlus size={16} />
+          </IconButton>
           <IconButton label="新建分组" onClick={() => void createGroup()}>
             <FolderPlus size={16} />
           </IconButton>
@@ -806,6 +966,16 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
       </header>
 
       {autostartPrompt && <AutostartPrompt />}
+      {scenes.length > 0 && device && (
+        <ScenesBar
+          scenes={scenes}
+          apps={all}
+          aliases={aliases}
+          renaming={renaming}
+          onRenameDone={finishRename}
+          onApply={applyScene}
+        />
+      )}
 
       {/* 系统音量固定在顶部（或底部），只有应用列表滚动。 */}
       {device && !masterAtBottom && (

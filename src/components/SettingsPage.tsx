@@ -339,6 +339,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const unpinApp = useSettingsStore((s) => s.unpinApp);
   const unhideApp = useSettingsStore((s) => s.unhideApp);
   const renameApp = useSettingsStore((s) => s.renameApp);
+  const deleteScene = useSettingsStore((s) => s.deleteScene);
   const [refreshRate, setRefreshRate] = useState<number | null>(null);
   /** 本次在设置页改过“硬件加速”，提示需要重启。 */
   const [restartNeeded, setRestartNeeded] = useState(false);
@@ -503,7 +504,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               {/* 只显示有内容的一项；都没有时整张卡片不显示（置顶和隐藏在主界面右键菜单中操作）。 */}
               {(settings.pinnedApps.length > 0 ||
                 settings.hiddenApps.length > 0 ||
-                settings.appAliases.length > 0) && (
+                settings.appAliases.length > 0 ||
+                settings.scenes.length > 0) && (
                 <Section title="应用">
                   {settings.pinnedApps.length > 0 && (
                     <SettingRow
@@ -546,6 +548,22 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                             const app = settings.appAliases.find((a) => a.appId === appId);
                             if (app) void renameApp(app, null);
                           }}
+                        />
+                      }
+                    />
+                  )}
+                  {settings.scenes.length > 0 && (
+                    <SettingRow
+                      title="音量场景"
+                      help="在主界面点击标题栏的书签按钮，把当前各应用的音量保存为场景；点击场景即可切换。右键场景可覆盖、重命名"
+                      below={
+                        <SavedAppList
+                          apps={settings.scenes.map((scene) => ({
+                            appId: scene.id,
+                            name: `${scene.name}（${scene.apps.length} 个应用）`,
+                          }))}
+                          actionLabel="删除"
+                          onAction={(sceneId) => void deleteScene(sceneId)}
                         />
                       }
                     />

@@ -19,6 +19,7 @@ export function IconButton({ label, className, children, ...props }: IconButtonP
         className={cn(
           "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground",
           "transition-colors hover:bg-accent hover:text-foreground",
+          "disabled:pointer-events-none disabled:opacity-40",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           className,
         )}

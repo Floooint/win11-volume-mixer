@@ -26,11 +26,11 @@ export const commands = {
 	playVolumeFeedback: () => __TAURI_INVOKE<void>("play_volume_feedback"),
 	/**  窗口所在显示器的刷新率（Hz），读取失败时为 `None`。设置页用它显示默认帧率。 */
 	getRefreshRate: () => __TAURI_INVOKE<number | null>("get_refresh_rate"),
-	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings").then((v) => (({...v,groups:v.groups.map(i=>({...i,apps:i.apps.map(i=>i)}))}) as typeof v)),
+	getSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_settings").then((v) => (({...v,groups:v.groups.map(i=>({...i,apps:i.apps.map(i=>i)})),scenes:v.scenes.map(i=>({...i,apps:i.apps.map(i=>i)}))}) as typeof v)),
 	/**  各设置项的默认值。设置页据此判断是否显示“恢复默认”。 */
-	getDefaultSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_default_settings").then((v) => (({...v,groups:v.groups.map(i=>({...i,apps:i.apps.map(i=>i)}))}) as typeof v)),
+	getDefaultSettings: () => __TAURI_INVOKE<Settings_Serialize>("get_default_settings").then((v) => (({...v,groups:v.groups.map(i=>({...i,apps:i.apps.map(i=>i)})),scenes:v.scenes.map(i=>({...i,apps:i.apps.map(i=>i)}))}) as typeof v)),
 	/**  保存设置并立即生效。窗口隐藏策略在下一次隐藏窗口时生效。 */
-	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings: ({...settings,groups:settings.groups?.map(i=>({...i,apps:i.apps.map(i=>i)}))}) })),
+	setSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("set_settings", { settings: ({...settings,groups:settings.groups?.map(i=>({...i,apps:i.apps.map(i=>i)})),scenes:settings.scenes?.map(i=>({...i,apps:i.apps.map(i=>i)}))}) })),
 	/**  设置页拖动宽度滑块时预览窗口宽度（逻辑像素），不写入设置；松手后由 `set_settings` 保存。 */
 	previewWindowWidth: (width: number) => __TAURI_INVOKE<void>("preview_window_width", { width }),
 	/**  是否开机自启（读取系统中的实际注册状态）。 */
@@ -168,6 +168,23 @@ export type SavedApp = {
 	name: string,
 };
 
+/**  音量场景：一组应用的音量组合，一键切换（如“游戏”“会议”“音乐”）。 */
+export type Scene = {
+	/**  场景标识，创建时由前端生成，不随改名变化。 */
+	id: string,
+	name: string,
+	apps: SceneApp[],
+};
+
+/**  场景中一个应用的音量。 */
+export type SceneApp = {
+	appId: string,
+	name: string,
+	/**  音量（0–1）。 */
+	volume: number,
+	muted: boolean,
+};
+
 export type Settings = Settings_Serialize | Settings_Deserialize;
 
 export type Settings_Deserialize = {
@@ -202,6 +219,8 @@ export type Settings_Deserialize = {
 	groups?: AppGroup[],
 	/**  重命名的应用。 */
 	appAliases?: AppAlias[],
+	/**  音量场景，按显示顺序排列。 */
+	scenes?: Scene[],
 	trayStyle?: TrayStyle,
 	/**  托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。 */
 	trayColor?: string | null,
@@ -241,6 +260,8 @@ export type Settings_Serialize = {
 	groups: AppGroup[],
 	/**  重命名的应用。 */
 	appAliases: AppAlias[],
+	/**  音量场景，按显示顺序排列。 */
+	scenes: Scene[],
 	trayStyle: TrayStyle,
 	/**  托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。 */
 	trayColor: string | null,

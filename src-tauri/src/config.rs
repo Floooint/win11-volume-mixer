@@ -51,6 +51,27 @@ pub enum ThemeMode {
     Dark,
 }
 
+/// 场景中一个应用的音量。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneApp {
+    pub app_id: String,
+    pub name: String,
+    /// 音量（0–1）。
+    pub volume: f64,
+    pub muted: bool,
+}
+
+/// 音量场景：一组应用的音量组合，一键切换（如“游戏”“会议”“音乐”）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Scene {
+    /// 场景标识，创建时由前端生成，不随改名变化。
+    pub id: String,
+    pub name: String,
+    pub apps: Vec<SceneApp>,
+}
+
 /// 托盘图标样式，见 `tray/glyph.rs`。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -143,6 +164,8 @@ pub struct Settings {
     pub groups: Vec<AppGroup>,
     /// 重命名的应用。
     pub app_aliases: Vec<AppAlias>,
+    /// 音量场景，按显示顺序排列。
+    pub scenes: Vec<Scene>,
     pub tray_style: TrayStyle,
     /// 托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。
     pub tray_color: Option<String>,
@@ -168,6 +191,7 @@ impl Default for Settings {
             hidden_apps: Vec::new(),
             groups: Vec::new(),
             app_aliases: Vec::new(),
+            scenes: Vec::new(),
             tray_style: TrayStyle::default(),
             tray_color: None,
             autostart_prompt: false,
@@ -190,6 +214,7 @@ impl Settings {
         self.hidden_apps = saved_apps(self.hidden_apps);
         self.groups = normalized_groups(self.groups);
         self.app_aliases = normalized_aliases(self.app_aliases);
+        self.scenes = normalized_scenes(self.scenes);
         self.window_width = self
             .window_width
             .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
@@ -216,6 +241,25 @@ fn normalized_aliases(aliases: Vec<AppAlias>) -> Vec<AppAlias> {
                 && !a.app_id.starts_with("pid:")
                 && seen.insert(a.app_id.clone());
             keep.then_some(a)
+        })
+        .collect()
+}
+
+/// 去掉重复的场景和场景中重复的应用，以及以 PID 标识的应用；音量限制在 0–1。
+fn normalized_scenes(scenes: Vec<Scene>) -> Vec<Scene> {
+    let mut ids = std::collections::HashSet::new();
+    scenes
+        .into_iter()
+        .filter(|scene| ids.insert(scene.id.clone()))
+        .map(|mut scene| {
+            let mut apps = std::collections::HashSet::new();
+            scene
+                .apps
+                .retain(|a| !a.app_id.starts_with("pid:") && apps.insert(a.app_id.clone()));
+            for app in &mut scene.apps {
+                app.volume = unit_or_full(app.volume);
+            }
+            scene
         })
         .collect()
 }
@@ -432,13 +476,14 @@ mod tests {
             hidden_apps: Vec::new(),
             groups: Vec::new(),
             app_aliases: Vec::new(),
+            scenes: Vec::new(),
             tray_style: TrayStyle::Number,
             tray_color: Some("#FFFFFF".into()),
             autostart_prompt: false,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"trayStyle":"number","trayColor":"#FFFFFF","autostartPrompt":false}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"trayStyle":"number","trayColor":"#FFFFFF","autostartPrompt":false}"##
         );
     }
 
@@ -546,6 +591,38 @@ mod tests {
             .collect();
         assert_eq!(aliases, [("a", 2), ("c", MAX_ALIAS_CHARS)]);
         assert_eq!(settings.app_aliases[0].alias, "音乐");
+    }
+
+    #[test]
+    fn 场景去重并限制音量() {
+        let app = |id: &str, volume: f64| SceneApp {
+            app_id: id.into(),
+            name: id.into(),
+            volume,
+            muted: false,
+        };
+        let scene = |id: &str, apps: Vec<SceneApp>| Scene {
+            id: id.into(),
+            name: id.into(),
+            apps,
+        };
+        let settings = Settings {
+            scenes: vec![
+                scene("s1", vec![app("a", 1.5), app("pid:3", 0.5), app("a", 0.2)]),
+                scene("s1", vec![]),
+                scene("s2", vec![app("a", -1.0), app("b", f64::NAN)]),
+            ],
+            ..Settings::default()
+        }
+        .normalized();
+        assert_eq!(settings.scenes.len(), 2);
+        let volumes = |s: &Scene| s.apps.iter().map(|a| a.volume).collect::<Vec<_>>();
+        assert_eq!(
+            volumes(&settings.scenes[0]),
+            [1.0],
+            "重复的应用只保留第一个"
+        );
+        assert_eq!(volumes(&settings.scenes[1]), [0.0, 1.0]);
     }
 
     #[test]

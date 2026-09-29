@@ -5,6 +5,8 @@ import {
   commands,
   type GroupMember,
   type SavedApp,
+  type Scene,
+  type SceneApp,
   type Settings_Serialize as Settings,
 } from "@/bindings";
 
@@ -39,16 +41,25 @@ type SettingsState = {
   deleteGroup: (groupId: string) => Promise<void>;
   /** 重命名应用；`alias` 为空时恢复原名。 */
   renameApp: (app: SavedApp, alias: string | null) => Promise<void>;
+  /** 把当前各应用的音量保存为新场景，返回其标识。 */
+  createScene: (apps: SceneApp[]) => Promise<string>;
+  updateScene: (sceneId: string, patch: Partial<Omit<Scene, "id">>) => Promise<void>;
+  deleteScene: (sceneId: string) => Promise<void>;
+  /**
+   * 应用场景后，分组中成员的音量被直接改变：按组音量换算，更新它们在组音量 100% 时的音量，
+   * 之后拖动组音量时仍按比例缩放。`volumes` 为（应用标识，新音量）。
+   */
+  syncGroupMembers: (volumes: [string, number][]) => Promise<void>;
 };
 
 const without = <T extends { appId: string }>(apps: T[], appId: string) =>
   apps.filter((a) => a.appId !== appId);
 
-/** 新分组的默认名称：“分组 1”“分组 2”…，跳过已使用的编号。 */
-function nextGroupName(groups: AppGroup[]): string {
-  const used = new Set(groups.map((g) => g.name));
+/** 新分组 / 场景的默认名称：“分组 1”“分组 2”…，跳过已使用的编号。 */
+function nextName(items: { name: string }[], prefix: string): string {
+  const used = new Set(items.map((g) => g.name));
   for (let i = 1; ; i++) {
-    if (!used.has(`分组 ${i}`)) return `分组 ${i}`;
+    if (!used.has(`${prefix} ${i}`)) return `${prefix} ${i}`;
   }
 }
 
@@ -119,7 +130,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (!s) return id;
     const group: AppGroup = {
       id,
-      name: nextGroupName(s.groups),
+      name: nextName(s.groups, "分组"),
       apps: [],
       volume: 1,
       expanded: true,
@@ -186,5 +197,39 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const entry: AppAlias | null =
       trimmed && trimmed !== app.name ? { appId: app.appId, name: app.name, alias: trimmed } : null;
     await get().save({ appAliases: entry ? [...rest, entry] : rest });
+  },
+  createScene: async (apps) => {
+    const id = `scene-${Date.now().toString(36)}`;
+    const s = get().settings;
+    if (!s) return id;
+    const scene: Scene = { id, name: nextName(s.scenes, "场景"), apps };
+    await get().save({ scenes: [...s.scenes, scene] });
+    return id;
+  },
+  updateScene: async (sceneId, patch) => {
+    const s = get().settings;
+    if (!s) return;
+    await get().save({ scenes: s.scenes.map((c) => (c.id === sceneId ? { ...c, ...patch } : c)) });
+  },
+  deleteScene: async (sceneId) => {
+    const s = get().settings;
+    if (!s) return;
+    await get().save({ scenes: s.scenes.filter((c) => c.id !== sceneId) });
+  },
+  syncGroupMembers: async (volumes) => {
+    const s = get().settings;
+    if (!s) return;
+    const byId = new Map(volumes);
+    const touched = s.groups.some((g) => g.apps.some((a) => byId.has(a.appId)));
+    if (!touched) return;
+    await get().save({
+      groups: s.groups.map((g) => ({
+        ...g,
+        apps: g.apps.map((a) => {
+          const volume = byId.get(a.appId);
+          return volume === undefined ? a : { ...a, fullVolume: fullVolume(volume, g.volume) };
+        }),
+      })),
+    });
   },
 }));

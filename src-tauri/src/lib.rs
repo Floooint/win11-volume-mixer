@@ -76,7 +76,9 @@ fn fix_optional_array_transforms(path: &str) {
     let Ok(text) = std::fs::read_to_string(path) else {
         return;
     };
-    let fixed = text.replace("settings.groups.map(", "settings.groups?.map(");
+    let fixed = text
+        .replace("settings.groups.map(", "settings.groups?.map(")
+        .replace("settings.scenes.map(", "settings.scenes?.map(");
     if fixed != text {
         let _ = std::fs::write(path, fixed);
     }
