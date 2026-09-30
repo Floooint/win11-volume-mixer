@@ -32,7 +32,7 @@ Win11 想单独调某个应用的音量，要点开快速设置、点小箭头�
 
 ## 安装
 
-在 [Releases](../../releases/latest) 下载安装包（`*-setup.exe`）或便携版（`win11-volume-mixer.exe`）。
+在 [Releases](../../releases/latest) 下载安装包（`*-setup.exe`）或便携版（`win11-volume-mixer_0.1.0_x64_portable.exe`）。
 
 针对 Windows 11 x64。
 
