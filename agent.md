@@ -100,7 +100,7 @@ src/                  React 前端
   index.css           Tailwind 与主题变量
 src-tauri/            Tauri / Rust 后端
 prototypes/audio-cli/ 阶段 1 音频原型（参考实现，不参与打包）
-docs/                 项目文档
+docs/                 项目文档（仅本地保留，已在 .gitignore 中排除，不上传）
 ```
 
 ## 验证流程

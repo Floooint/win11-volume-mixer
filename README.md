@@ -2,11 +2,11 @@
 
 面向 Windows 11 的轻量级托盘音量控制工具。点击托盘图标，一眼看到所有正在使用声音的应用，逐个调节音量；外观贴近 Windows 11（Mica 背景、跟随系统深浅色与强调色）。
 
-<!-- 截图：把图片放到 docs/screenshots/ 下，文件名与下面一致即可显示。 -->
+<!-- 截图在 assets/screenshots/ 下，替换同名文件即可更新。 -->
 <p align="center">
-  <img src="docs/screenshots/main.png" alt="主窗口" width="300">
-  <img src="docs/screenshots/details.png" alt="应用详情" width="300">
-  <img src="docs/screenshots/settings.png" alt="设置页" width="300">
+  <img src="assets/screenshots/main.png" alt="主窗口" width="300">
+  <img src="assets/screenshots/details.png" alt="应用详情" width="300">
+  <img src="assets/screenshots/settings.png" alt="设置页" width="300">
 </p>
 
 ## 功能
@@ -94,10 +94,6 @@ Tauri 2、React 19、TypeScript、Tailwind CSS 4、Motion、Zustand；后端为 
 
 ## 文档
 
-- [项目说明](docs/readme.md)：目标、MVP 范围与验收标准
-- [架构设计](docs/architecture.md)：线程模型、Core Audio 接口、窗口与托盘、决策记录与实测数据
-- [开发路线](docs/roadmap.md)
-- [技术栈](docs/tech_stack.md)（含第三方许可证说明）
 - [开发环境与规范](agent.md)
 
 ## 许可证

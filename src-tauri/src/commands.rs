@@ -218,6 +218,28 @@ pub fn reveal_in_folder(path: String) -> AppResult<()> {
     crate::shell::reveal_in_folder(&path)
 }
 
+/// 用默认浏览器打开网址（设置页“关于”中的链接）。
+#[tauri::command]
+#[specta::specta]
+pub fn open_url(url: String) -> AppResult<()> {
+    crate::shell::open_url(&url)
+}
+
+/// 在资源管理器中选中设置文件；还没保存过设置（文件不存在）时打开所在文件夹。
+#[tauri::command]
+#[specta::specta]
+pub fn reveal_settings_file(config: State<'_, Config>) -> AppResult<()> {
+    let path = config.path().ok_or_else(|| {
+        crate::error::AppError::new(crate::error::ErrorCode::ShellFailure, "没有设置文件")
+    })?;
+    if path.exists() {
+        crate::shell::reveal_in_folder(&path.to_string_lossy())
+    } else {
+        let dir = path.parent().unwrap_or(path);
+        crate::shell::open_folder(dir)
+    }
+}
+
 /// 详情浮窗首次加载时读取要显示的内容；之后的更新通过 `details://show` 事件推送。
 #[tauri::command]
 #[specta::specta]

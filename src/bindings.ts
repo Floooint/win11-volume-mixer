@@ -54,6 +54,10 @@ export const commands = {
 	hideAppDetails: () => __TAURI_INVOKE<void>("hide_app_details"),
 	/**  在资源管理器中打开文件所在的文件夹并选中它（详情浮窗中点击路径）。 */
 	revealInFolder: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_in_folder", { path })),
+	/**  用默认浏览器打开网址（设置页“关于”中的链接）。 */
+	openUrl: (url: string) => typedError<null, AppError>(__TAURI_INVOKE("open_url", { url })),
+	/**  在资源管理器中选中设置文件；还没保存过设置（文件不存在）时打开所在文件夹。 */
+	revealSettingsFile: () => typedError<null, AppError>(__TAURI_INVOKE("reveal_settings_file")),
 	/**  详情浮窗首次加载时读取要显示的内容；之后的更新通过 `details://show` 事件推送。 */
 	getAppDetails: () => __TAURI_INVOKE<{
 	app: AppAudio,

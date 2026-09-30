@@ -9,6 +9,9 @@ dist/
 target/
 src-tauri/gen/schemas/
 
+# 项目文档只在本地保留，不上传
+/docs/
+
 # 日志与本地文件
 *.log
 .env

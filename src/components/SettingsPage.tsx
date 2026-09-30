@@ -6,6 +6,7 @@ import {
   type TrayStyle,
   type WindowPolicy_Serialize as WindowPolicy,
 } from "@/bindings";
+import { AboutSection } from "@/components/AboutSection";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
 import { ColorPicker, CustomSwatch } from "@/components/ColorPicker";
 import { IconButton } from "@/components/IconButton";
@@ -778,6 +779,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   />
                 </SettingRow>
               </Section>
+
+              <AboutSection />
             </>
           )}
           {error && <p className="mt-2 px-4 text-xs text-destructive">{error}</p>}

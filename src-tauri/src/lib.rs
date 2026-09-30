@@ -51,6 +51,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::toggle_app_details,
             commands::hide_app_details,
             commands::reveal_in_folder,
+            commands::open_url,
+            commands::reveal_settings_file,
             commands::get_app_details,
             commands::details_ready,
         ])

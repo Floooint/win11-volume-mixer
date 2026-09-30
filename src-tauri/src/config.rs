@@ -403,6 +403,11 @@ impl Config {
         }
     }
 
+    /// 设置文件的位置；无法确定位置（不能保存设置）时为 `None`。
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
     pub fn is_first_run(&self) -> bool {
         self.first_run
     }
