@@ -17,11 +17,11 @@ export const ABOUT = {
   },
 
   /** 项目主页，如 "https://github.com/<用户名>/<仓库名>"。 */
-  homepage: "",
+  homepage: "https://github.com/Floooint/win11-volume-mixer",
   /** 反馈问题的地址，如 "https://github.com/<用户名>/<仓库名>/issues"。 */
-  issues: "",
+  issues: "https://github.com/Floooint/win11-volume-mixer/issues",
   /** 下载 / 发布页（可选），如 "https://github.com/<用户名>/<仓库名>/releases"。 */
-  releases: "",
+  releases: "https://github.com/Floooint/win11-volume-mixer/releases",
 
   /** 本项目代码的许可证。 */
   license: "MIT",
