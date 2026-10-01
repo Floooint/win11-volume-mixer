@@ -1,0 +1,79 @@
+# 推送 v* 标签时构建安装包和便携版，创建 Release 草稿并上传。
+# 草稿不会公开，在 GitHub 网页上检查、补充更新说明后点“Publish release”才发布。
+# 也可以在 Actions 页面手动运行（只构建，产物在运行记录的 Artifacts 中下载，不创建 Release）。
+name: 发布
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  # 创建 Release 并上传附件。
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 版本号与本地一致：Node 读 .node-version，pnpm 读 package.json 的 packageManager，
+      # Rust 读 rust-toolchain.toml（首次运行 cargo 时由 rustup 自动安装）。
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: 安装 Rust 工具链
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 检查标签与版本号一致
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            Write-Error "标签 ${{ github.ref_name }} 与 tauri.conf.json 中的版本 $version 不一致"
+            exit 1
+          }
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+      - name: 单元测试
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: 构建
+        run: pnpm tauri build
+
+      - name: 整理发布文件
+        id: files
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force out | Out-Null
+          # 安装包文件名含中文产品名，上传时改为英文，下载链接更稳定。
+          Copy-Item (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName "out/win11-volume-mixer_${version}_x64-setup.exe"
+          Copy-Item src-tauri/target/release/win11-volume-mixer.exe "out/win11-volume-mixer_${version}_x64_portable.exe"
+          Get-ChildItem out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win11-volume-mixer
+          path: out/*.exe
+
+      - name: 创建 Release 草稿
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: ${{ github.ref_name }}
+          files: out/*.exe
+          generate_release_notes: true
