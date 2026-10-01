@@ -48,16 +48,37 @@ pub struct Motion {
     pub curve: CubicBezier,
 }
 
-/// 进入：从下方滑入。ease-out cubic `cubic-bezier(0.33, 1, 0.68, 1)`，起步快、平稳停下。
+impl Motion {
+    /// 时长乘以 `factor`（动画速度），曲线不变。
+    pub fn scaled(self, factor: f64) -> Self {
+        Self {
+            duration: self.duration.mul_f64(factor.max(0.0)),
+            ..self
+        }
+    }
+
+    /// 时长为零：不播放动画，直接到达终点。
+    pub fn instant(self) -> Self {
+        self.scaled(0.0)
+    }
+}
+
+/// 进入：从任务栏一侧轻微滑入。ease-out cubic `cubic-bezier(0.33, 1, 0.68, 1)`，起步快、平稳停下。
 pub const ENTER: Motion = Motion {
     duration: Duration::from_millis(50),
     curve: CubicBezier::new(0.33, 1.0, 0.68, 1.0),
 };
 
-/// 退出：向下滑出。ease-in cubic `cubic-bezier(0.32, 0, 0.67, 0)`，起步慢、逐渐加速。
+/// 退出：向任务栏一侧滑出屏幕。ease-in cubic `cubic-bezier(0.32, 0, 0.67, 0)`，起步慢、逐渐加速。
 pub const EXIT: Motion = Motion {
     duration: Duration::from_millis(100),
     curve: CubicBezier::new(0.32, 0.0, 0.67, 0.0),
+};
+
+/// 进入：从屏幕边缘整段滑入。移动距离比轻微滑入长得多，时长也相应加长。
+pub const ENTER_FROM_EDGE: Motion = Motion {
+    duration: Duration::from_millis(160),
+    curve: CubicBezier::new(0.33, 1.0, 0.68, 1.0),
 };
 
 /// 高度变化（切换页面、应用增减）：ease-out cubic，与进入相同的曲线，时长更长以便看清变化。
@@ -124,6 +145,14 @@ pub fn run(
     still_current: impl Fn() -> bool,
     frame: impl Fn(f64),
 ) -> bool {
+    if motion.duration.is_zero() {
+        // 时长为零时进度是 0/0，直接给出最后一帧。
+        if !still_current() {
+            return false;
+        }
+        frame(1.0);
+        return true;
+    }
     let interval = frame_interval(fps);
     let start = Instant::now();
     loop {
@@ -144,18 +173,18 @@ pub fn lerp(from: i32, to: i32, progress: f64) -> i32 {
     (f64::from(from) + f64::from(to - from) * progress).round() as i32
 }
 
-/// 按 `motion` 以 `fps` 帧率从 `from_y` 移动到 `to_y`，每帧调用 `move_to(y)`。
+/// 按 `motion` 以 `fps` 帧率从 `from` 移动到 `to`（`(x, y)`），每帧调用 `move_to(x, y)`。
 /// 返回 `true` 表示完整播放，`false` 表示中途被取消。
 pub fn slide(
     motion: Motion,
     fps: u32,
-    from_y: i32,
-    to_y: i32,
+    from: (i32, i32),
+    to: (i32, i32),
     still_current: impl Fn() -> bool,
-    move_to: impl Fn(i32),
+    move_to: impl Fn(i32, i32),
 ) -> bool {
     run(motion, fps, still_current, |progress| {
-        move_to(lerp(from_y, to_y, progress))
+        move_to(lerp(from.0, to.0, progress), lerp(from.1, to.1, progress))
     })
 }
 
@@ -166,7 +195,7 @@ mod tests {
 
     #[test]
     fn 曲线端点为0和1() {
-        for motion in [ENTER, EXIT, RESIZE] {
+        for motion in [ENTER, ENTER_FROM_EDGE, EXIT, RESIZE] {
             assert!(motion.curve.ease(0.0).abs() < 1e-9);
             assert!((motion.curve.ease(1.0) - 1.0).abs() < 1e-9);
         }
@@ -230,10 +259,10 @@ mod tests {
             let completed = slide(
                 motion,
                 90,
-                from,
-                to,
+                (0, from),
+                (0, to),
                 || true,
-                |y| positions.borrow_mut().push(y),
+                |_, y| positions.borrow_mut().push(y),
             );
             assert!(completed);
             let positions = positions.into_inner();
@@ -248,10 +277,10 @@ mod tests {
         let completed = slide(
             EXIT,
             90,
-            0,
-            100,
+            (0, 0),
+            (0, 100),
             || *frames.borrow() < 2,
-            |_| *frames.borrow_mut() += 1,
+            |_, _| *frames.borrow_mut() += 1,
         );
         assert!(!completed);
         assert_eq!(*frames.borrow(), 2);
@@ -302,7 +331,14 @@ mod tests {
     fn 帧率越高帧数越多() {
         let count = |fps| {
             let frames = RefCell::new(0);
-            slide(EXIT, fps, 0, 100, || true, |_| *frames.borrow_mut() += 1);
+            slide(
+                EXIT,
+                fps,
+                (0, 0),
+                (0, 100),
+                || true,
+                |_, _| *frames.borrow_mut() += 1,
+            );
             frames.into_inner()
         };
         let (low, high) = (count(30), count(240));
@@ -315,6 +351,45 @@ mod tests {
         assert_eq!(lerp(100, 300, 0.5), 200);
         assert_eq!(lerp(300, 100, 1.0), 100);
         assert_eq!(lerp(0, 3, 0.5), 2, "1.5 四舍五入为 2");
+    }
+
+    #[test]
+    fn 水平方向滑动结束于目标位置() {
+        let positions = RefCell::new(Vec::new());
+        slide(
+            ENTER,
+            90,
+            (-50, 300),
+            (100, 300),
+            || true,
+            |x, y| positions.borrow_mut().push((x, y)),
+        );
+        let positions = positions.into_inner();
+        assert_eq!(positions.first(), Some(&(-50, 300)));
+        assert_eq!(positions.last(), Some(&(100, 300)));
+        assert!(positions.iter().all(|&(_, y)| y == 300), "纵向不动");
+    }
+
+    #[test]
+    fn 无动画时只有一帧且立即到达终点() {
+        let positions = RefCell::new(Vec::new());
+        let completed = slide(
+            EXIT.instant(),
+            90,
+            (0, 0),
+            (0, 100),
+            || true,
+            |_, y| positions.borrow_mut().push(y),
+        );
+        assert!(completed);
+        assert_eq!(positions.into_inner(), [100]);
+    }
+
+    #[test]
+    fn 速度按倍数缩放时长() {
+        assert_eq!(EXIT.scaled(2.0).duration, Duration::from_millis(200));
+        assert_eq!(EXIT.scaled(0.5).duration, Duration::from_millis(50));
+        assert_eq!(EXIT.scaled(-1.0).duration, Duration::ZERO, "负数按零");
     }
 
     #[test]

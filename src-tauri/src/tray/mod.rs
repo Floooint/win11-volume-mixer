@@ -115,6 +115,10 @@ pub fn create(app: &App) -> tauri::Result<()> {
         app.handle(),
         app.state::<Config>().read(|s| s.taskbar_wheel),
     );
+    wheel::set_prewarm(
+        app.handle(),
+        app.state::<Config>().read(|s| s.prewarm_on_hover),
+    );
     Ok(())
 }
 
@@ -122,6 +126,12 @@ pub fn create(app: &App) -> tauri::Result<()> {
 pub fn set_taskbar_wheel(app: &AppHandle, enabled: bool) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || wheel::set_taskbar(&handle, enabled));
+}
+
+/// 设置中的“悬停任务栏时预加载窗口”变化后调用。可在任意线程调用。
+pub fn set_prewarm(app: &AppHandle, enabled: bool) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || wheel::set_prewarm(&handle, enabled));
 }
 
 /// 托盘图标的位置（物理像素），取不到时为 `None`。

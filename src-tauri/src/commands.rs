@@ -63,6 +63,13 @@ pub fn window_ready(app: tauri::AppHandle) {
     crate::window::ready(&app);
 }
 
+/// 新建窗口内容就绪，报告前端各阶段的时间点，后端输出分段耗时（见 `timing.rs`）。
+#[tauri::command]
+#[specta::specta]
+pub fn report_open_timing(app: tauri::AppHandle, marks: Vec<crate::timing::TimingMark>) {
+    crate::window::report_open_timing(&app, &marks);
+}
+
 /// 一次系统音量调节结束（松开滑块、滚轮停止）时调用，按设置播放提示音。
 #[tauri::command]
 #[specta::specta]
@@ -177,6 +184,7 @@ pub fn set_settings(
     let result = config.set(settings).map(|_| ());
     // 按保存后的设置（保存失败时即原来的设置）开启或关闭任务栏滚轮。
     crate::tray::set_taskbar_wheel(window.app_handle(), config.read(|s| s.taskbar_wheel));
+    crate::tray::set_prewarm(window.app_handle(), config.read(|s| s.prewarm_on_hover));
     // 结束宽度预览，按设置中的值调整；保存失败时即恢复为原来的宽度。
     crate::window::preview_width(&window, None);
     crate::window::apply_theme(&window);

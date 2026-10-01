@@ -3,10 +3,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import { commands } from "./bindings";
 import { DetailsView } from "./components/DetailsView";
 import { installContextMenu } from "./lib/context-menu";
+import { markOpen, readyAndReportOpenTiming } from "./lib/open-timing";
 import "./index.css";
+
+// 打包后所有模块在同一个脚本中，执行到这里说明脚本已解析、各模块已初始化。
+markOpen("脚本执行到入口");
 
 // 同一份页面同时用于主窗口和应用详情浮窗（见 src-tauri/src/details.rs）。
 const isDetails = getCurrentWindow().label === "details";
@@ -28,5 +31,8 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 
 // 等浏览器完成首帧绘制后再通知后端显示窗口，避免出现空白窗口。浮窗由它自己报告尺寸后显示。
 if (!isDetails) {
-  requestAnimationFrame(() => requestAnimationFrame(() => void commands.windowReady()));
+  requestAnimationFrame(() => {
+    markOpen("首帧开始");
+    requestAnimationFrame(() => void readyAndReportOpenTiming());
+  });
 }

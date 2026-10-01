@@ -17,6 +17,8 @@ export const commands = {
 	setGroupMute: (appIds: string[], muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_group_mute", { appIds, muted })),
 	/**  前端首次渲染完成。新建的窗口在此之后才显示，避免出现空白窗口。 */
 	windowReady: () => __TAURI_INVOKE<void>("window_ready"),
+	/**  新建窗口内容就绪，报告前端各阶段的时间点，后端输出分段耗时（见 `timing.rs`）。 */
+	reportOpenTiming: (marks: TimingMark[]) => __TAURI_INVOKE<void>("report_open_timing", { marks: marks.map(i=>i) }),
 	/**
 	 *  前端内容高度（逻辑像素）变化时调用，窗口高度随之调整。
 	 *  返回高度动画的时长（毫秒），立即完成时为 0；动画期间前端隐藏滚动条。
@@ -197,6 +199,31 @@ export type PinMode =
 /**  定住并置顶：失焦不隐藏，始终在最前。 */
 "pinnedOnTop";
 
+/**  窗口弹出（滑入 / 滑出）的方向。 */
+export type PopupDirection = 
+/**  跟随任务栏所在的边：任务栏在底部时从下往上，在顶部时从上往下，在左右两侧时横向滑入。 */
+"auto" | 
+/**  从下往上滑入，向下滑出。 */
+"fromBottom" | 
+/**  从上往下滑入，向上滑出。 */
+"fromTop" | 
+/**  从左往右滑入，向左滑出。 */
+"fromLeft" | 
+/**  从右往左滑入，向右滑出。 */
+"fromRight";
+
+/**  窗口弹出动画的速度。 */
+export type PopupSpeed = "fast" | "normal" | "slow";
+
+/**  窗口弹出动画的样式。 */
+export type PopupStyle = 
+/**  从附近一小段距离滑入，滑出屏幕。 */
+"slide" | 
+/**  从屏幕边缘整段滑入，滑出屏幕。 */
+"slideFromEdge" | 
+/**  不播放动画，直接显示 / 隐藏。 */
+"none";
+
 /**  置顶或隐藏的应用。记下名称，应用没在运行时也能在设置页中显示。 */
 export type SavedApp = {
 	appId: string,
@@ -226,12 +253,21 @@ export type Settings_Deserialize = {
 	windowPolicy?: WindowPolicy_Deserialize,
 	/**  智能模式下，窗口隐藏多少秒后释放界面。 */
 	smartReleaseSeconds?: number,
+	/**
+	 *  鼠标移到任务栏上时在后台预先创建窗口，点击托盘图标即可直接显示；移出任务栏 5 秒后释放。
+	 *  只对需要新建窗口的情况（静默模式、智能模式释放后）起作用。默认开启。
+	 */
+	prewarmOnHover?: boolean,
 	/**  调节系统音量后播放提示音。 */
 	volumeFeedback?: boolean,
 	/**  在主界面显示调试工具（添加占位应用）。 */
 	debugTools?: boolean,
 	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。 */
 	animationFps?: number | null,
+	/**  窗口弹出的方向，默认跟随任务栏位置。 */
+	popupDirection?: PopupDirection,
+	popupStyle?: PopupStyle,
+	popupSpeed?: PopupSpeed,
 	/**  窗口宽度（逻辑像素）。 */
 	windowWidth?: number,
 	/**  系统音量放在应用列表下方（靠近任务栏），默认开启。 */
@@ -281,12 +317,21 @@ export type Settings_Serialize = {
 	windowPolicy: WindowPolicy_Serialize,
 	/**  智能模式下，窗口隐藏多少秒后释放界面。 */
 	smartReleaseSeconds: number,
+	/**
+	 *  鼠标移到任务栏上时在后台预先创建窗口，点击托盘图标即可直接显示；移出任务栏 5 秒后释放。
+	 *  只对需要新建窗口的情况（静默模式、智能模式释放后）起作用。默认开启。
+	 */
+	prewarmOnHover: boolean,
 	/**  调节系统音量后播放提示音。 */
 	volumeFeedback: boolean,
 	/**  在主界面显示调试工具（添加占位应用）。 */
 	debugTools: boolean,
 	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。 */
 	animationFps: number | null,
+	/**  窗口弹出的方向，默认跟随任务栏位置。 */
+	popupDirection: PopupDirection,
+	popupStyle: PopupStyle,
+	popupSpeed: PopupSpeed,
 	/**  窗口宽度（逻辑像素）。 */
 	windowWidth: number,
 	/**  系统音量放在应用列表下方（靠近任务栏），默认开启。 */
@@ -336,6 +381,13 @@ export type Settings_Serialize = {
 export type ThemeMode = 
 /**  跟随 Windows 的“应用模式”。 */
 "system" | "light" | "dark";
+
+/**  前端报告的一个时间点。 */
+export type TimingMark = {
+	name: string,
+	/**  系统时间，Unix 毫秒（`performance.timeOrigin + performance.now()`）。 */
+	epochMs: number,
+};
 
 /**  托盘图标样式，见 `tray/glyph.rs`。 */
 export type TrayStyle = 

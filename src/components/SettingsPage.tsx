@@ -1,6 +1,9 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   commands,
+  type PopupDirection,
+  type PopupSpeed,
+  type PopupStyle,
   type SavedApp,
   type ThemeMode,
   type TrayStyle,
@@ -239,6 +242,26 @@ function TrayColorPicker({
   );
 }
 
+const POPUP_DIRECTIONS: SelectOption<PopupDirection>[] = [
+  { value: "auto", label: "自动" },
+  { value: "fromBottom", label: "从下往上" },
+  { value: "fromTop", label: "从上往下" },
+  { value: "fromLeft", label: "从左往右" },
+  { value: "fromRight", label: "从右往左" },
+];
+
+const POPUP_STYLES: SelectOption<PopupStyle>[] = [
+  { value: "slide", label: "轻微滑入" },
+  { value: "slideFromEdge", label: "从屏幕边缘滑入" },
+  { value: "none", label: "无动画" },
+];
+
+const POPUP_SPEEDS: SelectOption<PopupSpeed>[] = [
+  { value: "fast", label: "快" },
+  { value: "normal", label: "标准" },
+  { value: "slow", label: "慢" },
+];
+
 /** 在后端 `config::WHEEL_STEP_RANGE`（1–10）之内。 */
 type WheelStep = "1" | "2" | "4" | "6" | "8" | "10";
 const WHEEL_STEPS: SelectOption<WheelStep>[] = (["1", "2", "4", "6", "8", "10"] as const).map(
@@ -457,6 +480,20 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     </span>
                   </SettingRow>
                 )}
+                {settings.windowPolicy !== "resident" && (
+                  <SettingRow
+                    title="悬停任务栏时预加载"
+                    help="鼠标移到任务栏上时在后台准备好窗口，点击托盘图标即可立即打开；移出任务栏 5 秒后仍未打开则释放。准备期间短暂占用约 180 MB 内存"
+                    isDefault={isDefault("prewarmOnHover")}
+                    onReset={() => reset("prewarmOnHover")}
+                  >
+                    <Switch
+                      label="悬停任务栏时预加载"
+                      checked={settings.prewarmOnHover}
+                      onChange={(prewarmOnHover) => save({ prewarmOnHover })}
+                    />
+                  </SettingRow>
+                )}
               </Section>
 
               <Section title="外观">
@@ -583,6 +620,74 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     options={TRAY_STYLES}
                     onChange={(trayStyle) => save({ trayStyle })}
                   />
+                </SettingRow>
+              </Section>
+
+              <Section title="动画">
+                <SettingRow
+                  title="弹出方向"
+                  help="窗口从哪一侧滑入，关闭时向同一侧滑出。自动：跟随任务栏位置，任务栏在底部时从下往上，在顶部时从上往下，在左右两侧时横向滑入"
+                  isDefault={isDefault("popupDirection")}
+                  onReset={() => reset("popupDirection")}
+                >
+                  <Select
+                    label="弹出方向"
+                    value={settings.popupDirection}
+                    options={POPUP_DIRECTIONS}
+                    onChange={(popupDirection) => save({ popupDirection })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="弹出样式"
+                  help="轻微滑入：从附近一小段距离滑入，干脆利落；从屏幕边缘滑入：整段滑入，动作更明显；无动画：直接显示和隐藏"
+                  isDefault={isDefault("popupStyle")}
+                  onReset={() => reset("popupStyle")}
+                >
+                  <Select
+                    label="弹出样式"
+                    value={settings.popupStyle}
+                    options={POPUP_STYLES}
+                    onChange={(popupStyle) => save({ popupStyle })}
+                  />
+                </SettingRow>
+                {settings.popupStyle !== "none" && (
+                  <SettingRow
+                    title="动画速度"
+                    help="窗口滑入、滑出的快慢。快为标准时长的一半，慢为两倍"
+                    isDefault={isDefault("popupSpeed")}
+                    onReset={() => reset("popupSpeed")}
+                  >
+                    <Select
+                      label="动画速度"
+                      value={settings.popupSpeed}
+                      options={POPUP_SPEEDS}
+                      onChange={(popupSpeed) => save({ popupSpeed })}
+                    />
+                  </SettingRow>
+                )}
+                <SettingRow
+                  title="动画帧率"
+                  help={
+                    settings.animationFps === null
+                      ? `当前跟随显示器刷新率${refreshRate ? `（${refreshRate} Hz）` : ""}；可填 ${MIN_FPS}–${MAX_FPS} 帧`
+                      : `${MIN_FPS}–${MAX_FPS} 帧，清空则跟随显示器刷新率`
+                  }
+                  isDefault={isDefault("animationFps")}
+                  onReset={() => reset("animationFps")}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <NumberInput
+                      label="动画帧率（帧 / 秒）"
+                      value={settings.animationFps}
+                      min={MIN_FPS}
+                      max={MAX_FPS}
+                      step={1}
+                      optional
+                      placeholder={refreshRate ? String(refreshRate) : "自动"}
+                      onCommit={(animationFps) => save({ animationFps })}
+                    />
+                    帧
+                  </span>
                 </SettingRow>
               </Section>
 
@@ -720,30 +825,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                     checked={settings.volumeFeedback}
                     onChange={(volumeFeedback) => save({ volumeFeedback })}
                   />
-                </SettingRow>
-                <SettingRow
-                  title="动画帧率"
-                  help={
-                    settings.animationFps === null
-                      ? `当前跟随显示器刷新率${refreshRate ? `（${refreshRate} Hz）` : ""}；可填 ${MIN_FPS}–${MAX_FPS} 帧`
-                      : `${MIN_FPS}–${MAX_FPS} 帧，清空则跟随显示器刷新率`
-                  }
-                  isDefault={isDefault("animationFps")}
-                  onReset={() => reset("animationFps")}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <NumberInput
-                      label="动画帧率（帧 / 秒）"
-                      value={settings.animationFps}
-                      min={MIN_FPS}
-                      max={MAX_FPS}
-                      step={1}
-                      optional
-                      placeholder={refreshRate ? String(refreshRate) : "自动"}
-                      onCommit={(animationFps) => save({ animationFps })}
-                    />
-                    帧
-                  </span>
                 </SettingRow>
                 <SettingRow
                   title="硬件加速"

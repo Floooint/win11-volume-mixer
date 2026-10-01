@@ -9,6 +9,7 @@ import {
   type SceneApp,
   type Settings_Serialize as Settings,
 } from "@/bindings";
+import { initialState } from "@/lib/initial-state";
 
 type SettingsState = {
   settings: Settings | null;
@@ -72,10 +73,12 @@ function fullVolume(volume: number, groupVolume: number): number {
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  settings: null,
-  defaults: null,
+  // 新建窗口时后端已注入设置，首次渲染即可使用；设置只会经由本程序修改，不必再读取。
+  settings: initialState?.settings ?? null,
+  defaults: initialState?.defaults ?? null,
   error: null,
   load: async () => {
+    if (get().settings && get().defaults) return;
     try {
       const [settings, defaults] = await Promise.all([
         commands.getSettings(),

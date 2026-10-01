@@ -16,8 +16,12 @@ use tauri::{
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::animation::{self, Generation};
-use crate::config::{Config, ThemeMode, WIDTH_RANGE, WindowPolicy};
+use crate::animation::{self, Generation, Motion};
+use crate::audio::{AudioService, AudioSnapshot, Command};
+use crate::config::{
+    Config, PopupDirection, PopupStyle, Settings, ThemeMode, WIDTH_RANGE, WindowPolicy,
+};
+use crate::timing::{OpenTiming, TimingMark};
 
 pub const MAIN: &str = "main";
 
@@ -68,6 +72,14 @@ pub struct WindowState {
     pending: Mutex<Option<Pending>>,
     /// 智能模式下的释放计时器；再次打开窗口时取消。
     release_timer: Mutex<Option<JoinHandle<()>>>,
+    /// 窗口已创建、前端尚未首次渲染完成。此时打开要等 `ready`，否则会显示空白窗口。
+    loading: AtomicBool,
+    /// 光标是否在任务栏上（设置项 `prewarmOnHover` 开启时才跟踪）。
+    over_taskbar: AtomicBool,
+    /// 窗口是为预加载而创建（或保留）的，还没有显示过；打开后清除，之后按运行模式处理。
+    prewarmed: AtomicBool,
+    /// 光标移出任务栏后释放预加载窗口的计时器；回到任务栏或打开窗口时取消。
+    prewarm_timer: Mutex<Option<JoinHandle<()>>>,
     /// 最近一次托盘图标位置，用于高度变化后重新定位，以及没有托盘位置的打开请求。
     last_tray: Mutex<Option<Rect>>,
     /// 滑出动画代数，打开窗口时递增以取消进行中的动画。
@@ -76,6 +88,11 @@ pub struct WindowState {
     hiding: AtomicBool,
     /// 是否正在播放滑入动画。此时高度变化不做动画，避免两个动画同时移动窗口。
     entering: AtomicBool,
+    /// 滑入动画使用的窗口外框尺寸。滑入期间的高度变化只更新这里，由滑入动画逐帧应用；
+    /// 滑入结束时在持有锁的情况下清除，之后的高度变化走正常的高度动画。
+    enter_size: Mutex<Option<PhysicalSize<u32>>>,
+    /// 为打开而新建窗口时的分段计时，前端报告内容就绪后输出并清除。
+    open_timing: Mutex<Option<OpenTiming>>,
     /// 高度动画代数，新的高度变化会取消进行中的动画。
     resize: Generation,
     /// 设置页拖动宽度滑块时的预览宽度（逻辑像素），保存后清除。
@@ -153,6 +170,88 @@ fn start_release_timer<R: Runtime>(window: &tauri::Window<R>) {
     }
 }
 
+/// 光标移出任务栏后，预加载的窗口保留多久再释放。
+const PREWARM_RELEASE: Duration = Duration::from_secs(5);
+
+fn prewarm_enabled<R: Runtime, M: Manager<R>>(manager: &M) -> bool {
+    manager.state::<Config>().read(|s| s.prewarm_on_hover)
+}
+
+fn cancel_prewarm_timer<R: Runtime, M: Manager<R>>(manager: &M) {
+    let timer = state_of(manager)
+        .prewarm_timer
+        .lock()
+        .ok()
+        .and_then(|mut t| t.take());
+    if let Some(timer) = timer {
+        timer.abort();
+    }
+}
+
+/// 光标进入或离开任务栏（含托盘区域）。只能在主线程调用：创建窗口必须在主线程上，
+/// 且不能在窗口过程内（WebView 创建期间会处理消息），因此由 `run_on_main_thread` 转发过来。
+///
+/// 进入时若没有窗口，在后台创建（不显示），点击托盘图标时即可直接显示；
+/// 离开 5 秒后仍未打开则释放。常驻模式和智能模式计时内窗口本来就在，不受影响。
+pub fn taskbar_hover<R: Runtime>(app: &AppHandle<R>, over: bool) {
+    let state = state_of(app);
+    state.over_taskbar.store(over, Ordering::SeqCst);
+    if !over {
+        if state.prewarmed.load(Ordering::SeqCst) {
+            start_prewarm_timer(app);
+        }
+        return;
+    }
+    cancel_prewarm_timer(app);
+    if !prewarm_enabled(app) || main_window(app).is_some() {
+        return;
+    }
+    match create(app) {
+        Ok(_) => {
+            state.prewarmed.store(true, Ordering::SeqCst);
+            eprintln!("[window] 鼠标移到任务栏，预加载窗口");
+        }
+        Err(e) => eprintln!("[window] 预加载窗口失败：{e}"),
+    }
+}
+
+fn start_prewarm_timer<R: Runtime>(app: &AppHandle<R>) {
+    cancel_prewarm_timer(app);
+    let handle = app.clone();
+    let timer = tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(PREWARM_RELEASE).await;
+        let state = state_of(&handle);
+        // 期间可能已打开窗口或回到任务栏，到期时再确认一次。
+        let waiting_to_show = state.pending.lock().ok().is_some_and(|p| p.is_some());
+        if state.prewarmed.swap(false, Ordering::SeqCst)
+            && !state.over_taskbar.load(Ordering::SeqCst)
+            && !waiting_to_show
+            && let Some(window) = main_window(&handle)
+            && !window.is_visible().unwrap_or(true)
+        {
+            eprintln!("[window] 鼠标离开任务栏 5 秒，释放预加载的窗口");
+            let _ = window.destroy();
+        }
+    });
+    if let Ok(mut t) = state_of(app).prewarm_timer.lock() {
+        *t = Some(timer);
+    }
+}
+
+/// 设置项 `prewarmOnHover` 关闭后，释放还没显示过的预加载窗口（窗口隐藏时）。
+pub fn stop_prewarm<R: Runtime>(app: &AppHandle<R>) {
+    cancel_prewarm_timer(app);
+    let state = state_of(app);
+    state.over_taskbar.store(false, Ordering::SeqCst);
+    if state.prewarmed.swap(false, Ordering::SeqCst)
+        && policy(app) != WindowPolicy::Resident
+        && let Some(window) = main_window(app)
+        && !window.is_visible().unwrap_or(true)
+    {
+        let _ = window.destroy();
+    }
+}
+
 /// 矩形（物理像素）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -192,6 +291,93 @@ fn taskbar_edge(monitor: Rect, work_area: Rect) -> Edge {
         .filter(|(_, gap)| *gap > 0.0)
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .map_or(Edge::Bottom, |(edge, _)| edge)
+}
+
+/// 窗口滑入 / 滑出所在的一侧：从这一侧进入，向这一侧离开。“自动”时为任务栏所在的边。
+fn popup_edge(direction: PopupDirection, monitor: Rect, work_area: Rect) -> Edge {
+    match direction {
+        PopupDirection::Auto => taskbar_edge(monitor, work_area),
+        PopupDirection::FromBottom => Edge::Bottom,
+        PopupDirection::FromTop => Edge::Top,
+        PopupDirection::FromLeft => Edge::Left,
+        PopupDirection::FromRight => Edge::Right,
+    }
+}
+
+/// 位于 `pos`、外框尺寸为 `size` 的窗口沿 `edge` 方向刚好完全移出显示器时的左上角位置。
+fn offscreen_position(edge: Edge, pos: (i32, i32), size: (i32, i32), monitor: Rect) -> (i32, i32) {
+    let (x, y) = pos;
+    match edge {
+        Edge::Bottom => (x, monitor.bottom().round() as i32),
+        Edge::Top => (x, monitor.y.round() as i32 - size.1),
+        Edge::Left => (monitor.x.round() as i32 - size.0, y),
+        Edge::Right => (monitor.right().round() as i32, y),
+    }
+}
+
+/// 滑入的起点：轻微滑入时从目标位置朝 `edge` 一侧偏移 `distance` 处开始，
+/// 从屏幕边缘滑入时从屏幕外开始，无动画时就是目标位置。
+fn enter_start(
+    style: PopupStyle,
+    edge: Edge,
+    target: (i32, i32),
+    size: (i32, i32),
+    monitor: Rect,
+    distance: i32,
+) -> (i32, i32) {
+    let (x, y) = target;
+    match (style, edge) {
+        (PopupStyle::None, _) => target,
+        (PopupStyle::SlideFromEdge, _) => offscreen_position(edge, target, size, monitor),
+        (PopupStyle::Slide, Edge::Bottom) => (x, y + distance),
+        (PopupStyle::Slide, Edge::Top) => (x, y - distance),
+        (PopupStyle::Slide, Edge::Left) => (x - distance, y),
+        (PopupStyle::Slide, Edge::Right) => (x + distance, y),
+    }
+}
+
+/// 按设置得出的弹出动画：所在的一侧，以及按样式和速度调整后的进入 / 退出动画。
+struct Popup {
+    edge: Edge,
+    style: PopupStyle,
+    enter: Motion,
+    exit: Motion,
+}
+
+fn popup<R: Runtime, M: Manager<R>>(manager: &M, monitor: &tauri::Monitor) -> Popup {
+    let (direction, style, speed) = manager
+        .state::<Config>()
+        .read(|s| (s.popup_direction, s.popup_style, s.popup_speed));
+    let (screen, work_area) = monitor_rects(monitor);
+    let enter = match style {
+        PopupStyle::SlideFromEdge => animation::ENTER_FROM_EDGE,
+        _ => animation::ENTER,
+    };
+    let factor = match style {
+        PopupStyle::None => 0.0,
+        _ => speed.duration_factor(),
+    };
+    Popup {
+        edge: popup_edge(direction, screen, work_area),
+        style,
+        enter: enter.scaled(factor),
+        exit: animation::EXIT.scaled(factor),
+    }
+}
+
+/// 显示器区域与工作区（物理像素）。
+fn monitor_rects(monitor: &tauri::Monitor) -> (Rect, Rect) {
+    let to_rect = |pos: PhysicalPosition<i32>, size: PhysicalSize<u32>| Rect {
+        x: pos.x.into(),
+        y: pos.y.into(),
+        width: size.width.into(),
+        height: size.height.into(),
+    };
+    let area = monitor.work_area();
+    (
+        to_rect(*monitor.position(), *monitor.size()),
+        to_rect(area.position, area.size),
+    )
 }
 
 /// 计算窗口左上角位置：贴近任务栏，水平（或垂直）方向对齐托盘图标，并限制在工作区内。
@@ -283,10 +469,15 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         .iter()
         .find(|w| w.label == MAIN)
         .expect("tauri.conf.json 中缺少主窗口配置");
+    mark_open(app, "开始创建窗口");
+    state_of(app).loading.store(true, Ordering::SeqCst);
     let window = WebviewWindowBuilder::from_config(app, config)?
         .additional_browser_args(&browser_args_for(app))
         .theme(theme_for(app))
+        .initialization_script(initial_state_script(app))
         .build()?;
+    // 包含启动 WebView2 浏览器进程和创建控件。
+    mark_open(app, "WebView 创建完成");
     disable_system_transitions(&window);
     // 窗口被释放后重建时，恢复当前的固定方式（配置中默认置顶）。
     let _ = window.set_always_on_top(pin_mode(app).always_on_top());
@@ -295,6 +486,47 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
         crate::context_menu::install(&handle, &webview.controller(), &webview.environment())
     });
     Ok(window)
+}
+
+/// 等待音频快照的上限。音频线程通常 1 ms 内回复；忙时不拖慢窗口创建，改由前端自行读取。
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_millis(50);
+
+/// 页面脚本运行前注入的初始数据：音频快照和设置。前端首次渲染就能显示完整列表，
+/// 不必先显示骨架屏、等读取完成再换成列表（窗口高度也因此不再变化）。见 `src/lib/initial-state.ts`。
+/// 快照在创建窗口时读取，到前端订阅事件之间的变化由前端订阅后重新读取一次补上。
+fn initial_state_script<R: Runtime>(app: &AppHandle<R>) -> String {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct InitialState {
+        snapshot: Option<AudioSnapshot>,
+        settings: Settings,
+        defaults: Settings,
+    }
+    // 主线程上同步等待；在异步运行时的线程上不能 block_on，此时跳过快照。
+    let snapshot = tokio::runtime::Handle::try_current()
+        .is_err()
+        .then(|| {
+            let audio = app.state::<AudioService>();
+            // 计时器必须在运行时内创建，因此放进 async 块，不能作为 block_on 的参数直接构造。
+            tauri::async_runtime::block_on(async {
+                tokio::time::timeout(SNAPSHOT_TIMEOUT, audio.request(Command::Snapshot)).await
+            })
+        })
+        .and_then(|result| result.ok()?.ok())
+        // 没有设备的快照（如程序刚启动、音频线程还没打开设备）不注入，免得先显示“没有设备”。
+        .filter(|snapshot| snapshot.device.is_some());
+    let state = InitialState {
+        snapshot,
+        settings: app.state::<Config>().get(),
+        defaults: Settings::default(),
+    };
+    match serde_json::to_string(&state) {
+        Ok(json) => format!("window.__INITIAL_STATE__ = {json};"),
+        Err(e) => {
+            eprintln!("[window] 序列化初始数据失败：{e}");
+            String::new()
+        }
+    }
 }
 
 /// 关闭 Windows 自带的窗口显示 / 隐藏过渡动画（淡入淡出、缩放），
@@ -348,16 +580,30 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, show: bool, tray: Option<Rect>) -> t
 pub fn show<R: Runtime>(app: &AppHandle<R>, tray: Option<Rect>) {
     let requested_at = Instant::now();
     cancel_release_timer(app);
+    cancel_prewarm_timer(app);
     cancel_hide_animation(app);
+    // 打开后不再算作预加载窗口，之后按运行模式处理。
+    let prewarmed = state_of(app).prewarmed.swap(false, Ordering::SeqCst);
     match main_window(app) {
         Some(window) => {
             // 窗口正在创建、尚未渲染完成时，等 `ready` 统一显示。
             let state = app.state::<WindowState>();
-            if let Ok(mut pending) = state.pending.lock()
-                && let Some(pending) = pending.as_mut()
-            {
-                pending.tray = tray.or(pending.tray);
-                return;
+            if let Ok(mut pending) = state.pending.lock() {
+                if let Some(pending) = pending.as_mut() {
+                    pending.tray = tray.or(pending.tray);
+                    return;
+                }
+                // 预加载的窗口还在加载（鼠标移到任务栏后很快就点击了）。
+                if state.loading.load(Ordering::SeqCst) {
+                    *pending = Some(Pending { tray, requested_at });
+                    if let Ok(mut timing) = state.open_timing.lock() {
+                        *timing = Some(OpenTiming::new(requested_at));
+                    }
+                    return;
+                }
+            }
+            if prewarmed {
+                eprintln!("[window] 使用预加载的窗口");
             }
             present(&window, tray);
             eprintln!(
@@ -366,6 +612,9 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, tray: Option<Rect>) {
             );
         }
         None => {
+            if let Ok(mut timing) = state_of(app).open_timing.lock() {
+                *timing = Some(OpenTiming::new(requested_at));
+            }
             if let Ok(mut pending) = app.state::<WindowState>().pending.lock() {
                 *pending = Some(Pending { tray, requested_at });
             }
@@ -378,6 +627,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, tray: Option<Rect>) {
 
 /// 前端首次渲染完成后调用。若窗口是为了打开而新建的，此时再显示。
 pub fn ready<R: Runtime>(app: &AppHandle<R>) {
+    state_of(app).loading.store(false, Ordering::SeqCst);
     let pending = app
         .state::<WindowState>()
         .pending
@@ -385,6 +635,7 @@ pub fn ready<R: Runtime>(app: &AppHandle<R>) {
         .ok()
         .and_then(|mut p| p.take());
     if let (Some(pending), Some(window)) = (pending, main_window(app)) {
+        mark_open(app, "窗口开始显示（滑入）");
         present(&window, pending.tray);
         eprintln!(
             "[window] 打开耗时 {:?}（新建窗口）",
@@ -393,68 +644,151 @@ pub fn ready<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+fn state_of<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::State<'_, WindowState> {
+    manager.state::<WindowState>()
+}
+
+/// 正在为打开而新建窗口时，记下一个时间点。
+fn mark_open<R: Runtime, M: Manager<R>>(manager: &M, name: &str) {
+    if let Ok(mut timing) = state_of(manager).open_timing.lock()
+        && let Some(timing) = timing.as_mut()
+    {
+        timing.mark(name);
+    }
+}
+
+/// 前端报告新建窗口内容就绪：合并前端的时间点，输出分段耗时。
+/// 不是为打开而新建的窗口（如启动时预先创建）没有计时，忽略。
+pub fn report_open_timing<R: Runtime>(app: &AppHandle<R>, marks: &[TimingMark]) {
+    let timing = state_of(app)
+        .open_timing
+        .lock()
+        .ok()
+        .and_then(|mut t| t.take());
+    if let Some(mut timing) = timing {
+        for mark in marks {
+            timing.mark_epoch(mark);
+        }
+        eprintln!("{}", timing.summary());
+    }
+}
+
 fn present<R: Runtime>(window: &WebviewWindow<R>, tray: Option<Rect>) {
     let tray = remember_tray(window, tray);
-    // 用计算出的目标位置，而不是移动后再读回：非主线程上 set_position 是异步的，读回可能是旧值。
-    let target = match tray.map(|tray| {
-        window
-            .outer_size()
-            .and_then(|size| target_near_tray(window, tray, size))
-    }) {
-        Some(Ok(Some(target))) => Some(target),
+    let tray_monitor = match tray.map(|tray| tray_monitor(window, tray)) {
+        Some(Ok(monitor)) => monitor,
         Some(Err(e)) => {
             eprintln!("[window] 定位失败：{e}");
             None
         }
-        _ => None,
-    }
-    .or_else(|| window.outer_position().ok());
-    let Some(target) = target else {
+        None => None,
+    };
+    // 外框尺寸为 `size` 时贴近托盘的位置。滑入期间高度可能变化，每帧按最新尺寸重新计算。
+    let layout = tray.zip(tray_monitor.as_ref()).map(|(tray, monitor)| {
+        let (screen, work_area) = monitor_rects(monitor);
+        (tray, screen, work_area, monitor.scale_factor())
+    });
+    let place = move |size: PhysicalSize<u32>| {
+        layout.map(|(tray, screen, work_area, scale)| {
+            let (x, y) = position_near_tray(
+                tray,
+                size.width.into(),
+                size.height.into(),
+                screen,
+                work_area,
+                scale,
+            );
+            PhysicalPosition::new(x.round() as i32, y.round() as i32)
+        })
+    };
+    let size = window.outer_size().unwrap_or_default();
+    // 用计算出的目标位置，而不是移动后再读回：非主线程上 set_position 是异步的，读回可能是旧值。
+    let (Some(target), Ok(hwnd)) = (
+        place(size).or_else(|| window.outer_position().ok()),
+        window.hwnd(),
+    ) else {
         let _ = window.show();
         let _ = window.set_focus();
         return;
     };
-    let offset = slide_distance(window);
+    let hwnd = hwnd.0 as isize;
+    let (width, height) = (size.width as i32, size.height as i32);
+    let monitor = tray_monitor.or_else(|| window.current_monitor().ok().flatten());
+    let (start, enter) = match &monitor {
+        Some(monitor) => {
+            let popup = popup(window, monitor);
+            let start = enter_start(
+                popup.style,
+                popup.edge,
+                (target.x, target.y),
+                (width, height),
+                monitor_rects(monitor).0,
+                slide_distance(monitor.scale_factor()),
+            );
+            (start, popup.enter)
+        }
+        None => ((target.x, target.y), animation::ENTER.instant()),
+    };
 
-    // 先放到目标位置下方再显示，然后滑到目标位置。
-    let _ = window.set_position(PhysicalPosition::new(target.x, target.y + offset));
+    // 先放到滑入的起点再显示，然后滑到目标位置。
+    let _ = window.set_position(PhysicalPosition::new(start.0, start.1));
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
 
+    // 滑入动画只移动相对目标位置的偏移，目标位置本身随尺寸变化。
+    let offset = (start.0 - target.x, start.1 - target.y);
+    let bounds = move |size: PhysicalSize<u32>, progress: f64| {
+        let base = place(size).unwrap_or(target);
+        set_bounds(
+            hwnd,
+            base.x + animation::lerp(offset.0, 0, progress),
+            base.y + animation::lerp(offset.1, 0, progress),
+            size.width as i32,
+            size.height as i32,
+        );
+    };
+
     let state = window.state::<WindowState>();
     let generation = state.animation.next();
+    if let Ok(mut enter_size) = state.enter_size.lock() {
+        *enter_size = Some(size);
+    }
     state.entering.store(true, Ordering::SeqCst);
     let window = window.clone();
     std::thread::spawn(move || {
         let state = window.state::<WindowState>();
-        let completed = animation::slide(
-            animation::ENTER,
+        let current_size = || {
+            state
+                .enter_size
+                .lock()
+                .ok()
+                .and_then(|s| *s)
+                .unwrap_or(size)
+        };
+        let completed = animation::run(
+            enter,
             fps(&window.as_ref().window()),
-            target.y + offset,
-            target.y,
             || state.animation.is_current(generation),
-            |y| {
-                let _ = window.set_position(PhysicalPosition::new(target.x, y));
-            },
+            |progress| bounds(current_size(), progress),
         );
-        // 被新的动画取消时不修正位置，交给新动画处理。滑入期间高度可能已变化（新建窗口时
-        // 列表稍后才加载），按当前尺寸重新贴近托盘，而不是用滑入前算出的位置。
-        if completed {
-            let placed = tray.is_some_and(|tray| move_near_tray(&window, tray).is_ok());
-            if !placed {
-                let _ = window.set_position(target);
-            }
+        // 被新的动画取消时不修正位置，交给新动画处理。
+        if !completed {
+            return;
         }
+        // 持有锁直到结束：此后的高度变化不再交给滑入动画，走正常的高度动画，不会丢失。
+        let Ok(mut enter_size) = state.enter_size.lock() else {
+            return;
+        };
         if state.animation.is_current(generation) {
+            bounds(enter_size.take().unwrap_or(size), 1.0);
             state.entering.store(false, Ordering::SeqCst);
         }
     });
 }
 
-/// 滑入的起始偏移：窗口高度的一小段，避免窗口从屏幕底部整段飞入。
-fn slide_distance<R: Runtime>(window: &WebviewWindow<R>) -> i32 {
-    let scale = window.scale_factor().unwrap_or(1.0);
+/// 轻微滑入的距离（物理像素）：一小段，避免窗口从屏幕边缘整段飞入。
+fn slide_distance(scale: f64) -> i32 {
     (24.0 * scale).round() as i32
 }
 
@@ -475,7 +809,7 @@ fn cancel_hide_animation<R: Runtime, M: Manager<R>>(manager: &M) {
     state.entering.store(false, Ordering::SeqCst);
 }
 
-/// 隐藏窗口：先向下滑出屏幕，再按运行模式隐藏或释放。
+/// 隐藏窗口：先向弹出方向所在的一侧滑出屏幕，再按运行模式隐藏或释放。
 fn hide<R: Runtime>(window: &tauri::Window<R>) {
     let state = window.state::<WindowState>();
     if state.hiding.swap(true, Ordering::SeqCst) {
@@ -491,18 +825,26 @@ fn hide<R: Runtime>(window: &tauri::Window<R>) {
     // 动画逐帧 sleep，放在独立线程，不阻塞事件循环。
     std::thread::spawn(move || {
         let origin = window.outer_position().ok();
-        let completed = match (origin, window.current_monitor().ok().flatten()) {
-            (Some(origin), Some(monitor)) => {
-                let bottom = monitor.position().y + monitor.size().height as i32;
+        let monitor = window.current_monitor().ok().flatten();
+        let size = window.outer_size().ok();
+        let completed = match (origin, monitor, size) {
+            (Some(origin), Some(monitor), Some(size)) => {
+                let popup = popup(&window, &monitor);
+                let to = offscreen_position(
+                    popup.edge,
+                    (origin.x, origin.y),
+                    (size.width as i32, size.height as i32),
+                    monitor_rects(&monitor).0,
+                );
                 let state = window.state::<WindowState>();
                 animation::slide(
-                    animation::EXIT,
+                    popup.exit,
                     fps(&window),
-                    origin.y,
-                    bottom,
+                    (origin.x, origin.y),
+                    to,
                     || state.animation.is_current(generation),
-                    |y| {
-                        let _ = window.set_position(PhysicalPosition::new(origin.x, y));
+                    |x, y| {
+                        let _ = window.set_position(PhysicalPosition::new(x, y));
                     },
                 )
             }
@@ -535,6 +877,15 @@ fn finish_hide<R: Runtime>(window: &tauri::Window<R>) -> bool {
     match policy(window) {
         WindowPolicy::Resident => {
             let _ = window.hide();
+            false
+        }
+        // 光标还在任务栏上（如点击托盘图标关闭）时可能马上再打开：先保留为预加载窗口，
+        // 移出任务栏 5 秒后再释放。
+        WindowPolicy::Silent
+            if prewarm_enabled(window) && state_of(window).over_taskbar.load(Ordering::SeqCst) =>
+        {
+            let _ = window.hide();
+            state_of(window).prewarmed.store(true, Ordering::SeqCst);
             false
         }
         WindowPolicy::Silent => {
@@ -591,6 +942,21 @@ fn try_fit_height<R: Runtime>(
     // 每次调整都会多出边框宽度，窗口越来越宽。因此宽度始终使用配置中的固定值。
     let width = (logical_width(window) * monitor.scale_factor()).round() as u32;
     let size = window.inner_size()?;
+    let state = window.state::<WindowState>();
+    // 滑入期间交给滑入动画：它每帧按最新尺寸重新贴近托盘，位置和尺寸一次设置。
+    // 若在这里只改尺寸，窗口会以左上角为准向下伸出（新建窗口时列表稍后才加载，高度会变大），
+    // 底边一直伸到屏幕底部，滑入结束后才跳回任务栏上方。
+    if let Ok(mut enter_size) = state.enter_size.lock()
+        && enter_size.is_some()
+        && state.entering.load(Ordering::SeqCst)
+    {
+        let outer = window.outer_size()?;
+        *enter_size = Some(PhysicalSize::new(
+            width + outer.width.saturating_sub(size.width),
+            height + outer.height.saturating_sub(size.height),
+        ));
+        return Ok(None);
+    }
     if size.height == height && size.width == width {
         return Ok(None);
     }
@@ -598,9 +964,8 @@ fn try_fit_height<R: Runtime>(
     // 窗口高度变化时应用行会移动，详情浮窗与应用行对不齐，收起它。
     crate::details::hide(window);
 
-    let state = window.state::<WindowState>();
     let tray = state.last_tray.lock().ok().and_then(|t| *t);
-    // 滑入 / 滑出动画进行中不打断：只调整尺寸，滑入结束时按新尺寸定位；隐藏时由下次显示负责定位。
+    // 滑出动画进行中不打断：只调整尺寸，隐藏后由下次显示负责定位。
     let visible = window.is_visible()?
         && !state.hiding.load(Ordering::SeqCst)
         && !state.entering.load(Ordering::SeqCst);
@@ -727,11 +1092,14 @@ fn set_bounds(hwnd: isize, x: i32, y: i32, width: i32, height: i32) {
     }
 }
 
-fn move_near_tray<R: Runtime>(window: &WebviewWindow<R>, tray: Rect) -> tauri::Result<()> {
-    if let Some(target) = target_near_tray(window, tray, window.outer_size()?)? {
-        window.set_position(target)?;
-    }
-    Ok(())
+/// 托盘图标所在的显示器，取不到时为主显示器。
+fn tray_monitor<R: Runtime>(
+    window: &WebviewWindow<R>,
+    tray: Rect,
+) -> tauri::Result<Option<tauri::Monitor>> {
+    Ok(window
+        .monitor_from_point(tray.x + tray.width / 2.0, tray.y + tray.height / 2.0)?
+        .or(window.primary_monitor()?))
 }
 
 /// 计算外框尺寸为 `size` 的窗口贴近托盘时的左上角位置；取不到显示器信息时返回 `None`。
@@ -740,29 +1108,16 @@ fn target_near_tray<R: Runtime>(
     tray: Rect,
     size: PhysicalSize<u32>,
 ) -> tauri::Result<Option<PhysicalPosition<i32>>> {
-    let Some(monitor) = window
-        .monitor_from_point(tray.x + tray.width / 2.0, tray.y + tray.height / 2.0)?
-        .or(window.primary_monitor()?)
-    else {
+    let Some(monitor) = tray_monitor(window, tray)? else {
         return Ok(None);
     };
-    let to_rect = |pos: PhysicalPosition<i32>, width: u32, height: u32| Rect {
-        x: pos.x.into(),
-        y: pos.y.into(),
-        width: width.into(),
-        height: height.into(),
-    };
-    let area = monitor.work_area();
+    let (screen, work_area) = monitor_rects(&monitor);
     let (x, y) = position_near_tray(
         tray,
         size.width.into(),
         size.height.into(),
-        to_rect(
-            *monitor.position(),
-            monitor.size().width,
-            monitor.size().height,
-        ),
-        to_rect(area.position, area.size.width, area.size.height),
+        screen,
+        work_area,
         monitor.scale_factor(),
     );
     Ok(Some(PhysicalPosition::new(
@@ -1031,6 +1386,103 @@ mod tests {
         let tray = rect(3400.0, 2080.0, 64.0, 64.0);
         let (_, y) = position_near_tray(tray, W, H, monitor, work, 2.0);
         assert_eq!(y, 2064.0 - H - 24.0);
+    }
+
+    #[test]
+    fn 自动方向跟随任务栏所在的边() {
+        let cases = [
+            (rect(0.0, 0.0, 1920.0, 1032.0), Edge::Bottom),
+            (rect(0.0, 48.0, 1920.0, 1032.0), Edge::Top),
+            (rect(64.0, 0.0, 1856.0, 1080.0), Edge::Left),
+            (rect(0.0, 0.0, 1856.0, 1080.0), Edge::Right),
+        ];
+        for (work, edge) in cases {
+            assert_eq!(popup_edge(PopupDirection::Auto, MONITOR, work), edge);
+        }
+    }
+
+    #[test]
+    fn 指定方向时不看任务栏位置() {
+        let top_taskbar = rect(0.0, 48.0, 1920.0, 1032.0);
+        assert_eq!(
+            popup_edge(PopupDirection::FromBottom, MONITOR, top_taskbar),
+            Edge::Bottom
+        );
+        assert_eq!(
+            popup_edge(PopupDirection::FromRight, MONITOR, top_taskbar),
+            Edge::Right
+        );
+    }
+
+    #[test]
+    fn 滑出时刚好完全离开屏幕() {
+        let (pos, size) = ((1500, 60), (380, 520));
+        assert_eq!(
+            offscreen_position(Edge::Bottom, pos, size, MONITOR),
+            (1500, 1080)
+        );
+        assert_eq!(
+            offscreen_position(Edge::Top, pos, size, MONITOR),
+            (1500, -520)
+        );
+        assert_eq!(
+            offscreen_position(Edge::Left, pos, size, MONITOR),
+            (-380, 60)
+        );
+        assert_eq!(
+            offscreen_position(Edge::Right, pos, size, MONITOR),
+            (1920, 60)
+        );
+    }
+
+    #[test]
+    fn 副显示器上滑出到该显示器之外() {
+        let monitor = rect(1920.0, -200.0, 1920.0, 1080.0);
+        let (pos, size) = ((2000, 0), (380, 520));
+        assert_eq!(
+            offscreen_position(Edge::Top, pos, size, monitor),
+            (2000, -720)
+        );
+        assert_eq!(
+            offscreen_position(Edge::Left, pos, size, monitor),
+            (1540, 0)
+        );
+    }
+
+    #[test]
+    fn 轻微滑入从任务栏一侧偏移一小段() {
+        let start =
+            |edge| enter_start(PopupStyle::Slide, edge, (100, 200), (380, 520), MONITOR, 24);
+        assert_eq!(start(Edge::Bottom), (100, 224));
+        assert_eq!(start(Edge::Top), (100, 176), "任务栏在顶部时从上方滑入");
+        assert_eq!(start(Edge::Left), (76, 200));
+        assert_eq!(start(Edge::Right), (124, 200));
+    }
+
+    #[test]
+    fn 从屏幕边缘滑入从屏幕外开始() {
+        let start = enter_start(
+            PopupStyle::SlideFromEdge,
+            Edge::Top,
+            (100, 60),
+            (380, 520),
+            MONITOR,
+            24,
+        );
+        assert_eq!(start, (100, -520));
+    }
+
+    #[test]
+    fn 无动画时直接在目标位置显示() {
+        let start = enter_start(
+            PopupStyle::None,
+            Edge::Bottom,
+            (100, 200),
+            (380, 520),
+            MONITOR,
+            24,
+        );
+        assert_eq!(start, (100, 200));
     }
 
     #[test]

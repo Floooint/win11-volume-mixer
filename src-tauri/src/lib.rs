@@ -12,6 +12,7 @@ mod events;
 mod feedback;
 mod icon;
 mod shell;
+mod timing;
 mod tray;
 mod window;
 
@@ -36,6 +37,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_group_volume,
             commands::set_group_mute,
             commands::window_ready,
+            commands::report_open_timing,
             commands::fit_window_height,
             commands::play_volume_feedback,
             commands::get_refresh_rate,

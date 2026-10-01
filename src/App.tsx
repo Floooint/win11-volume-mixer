@@ -1,9 +1,10 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { MotionConfig } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { MainPage } from "@/components/MainPage";
 import { SettingsPage } from "@/components/SettingsPage";
 import { useApplyAccent, useSystemAccent } from "@/lib/accent";
+import { markOpen } from "@/lib/open-timing";
 import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -15,6 +16,7 @@ export default function App() {
   const systemAccent = useSystemAccent();
   useApplyAccent(accent, systemAccent);
 
+  useLayoutEffect(() => markOpen("React 首次渲染完成"), []);
   // 在最外层订阅，切换页面时不会重复获取快照。
   useEffect(() => connect(), [connect]);
   useEffect(() => void loadSettings(), [loadSettings]);

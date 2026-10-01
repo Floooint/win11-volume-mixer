@@ -7,6 +7,7 @@ import {
   events,
   type VolumeState,
 } from "@/bindings";
+import { initialState } from "@/lib/initial-state";
 
 type AudioState = {
   snapshot: AudioSnapshot | null;
@@ -102,7 +103,9 @@ export const useAudioStore = create<AudioState>((set, get) => {
   };
 
   return {
-    snapshot: null,
+    // 新建窗口时后端已注入快照，首次渲染即显示列表。注入到订阅事件之间的变化，
+    // 由 `connect` 订阅后重新读取一次补上。
+    snapshot: initialState?.snapshot ?? null,
     error: null,
     loadError: null,
     connect: () => {

@@ -58,6 +58,57 @@ pub enum ThemeMode {
     Dark,
 }
 
+/// 窗口弹出（滑入 / 滑出）的方向。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PopupDirection {
+    /// 跟随任务栏所在的边：任务栏在底部时从下往上，在顶部时从上往下，在左右两侧时横向滑入。
+    #[default]
+    Auto,
+    /// 从下往上滑入，向下滑出。
+    FromBottom,
+    /// 从上往下滑入，向上滑出。
+    FromTop,
+    /// 从左往右滑入，向左滑出。
+    FromLeft,
+    /// 从右往左滑入，向右滑出。
+    FromRight,
+}
+
+/// 窗口弹出动画的样式。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PopupStyle {
+    /// 从附近一小段距离滑入，滑出屏幕。
+    Slide,
+    /// 从屏幕边缘整段滑入，滑出屏幕。
+    #[default]
+    SlideFromEdge,
+    /// 不播放动画，直接显示 / 隐藏。
+    None,
+}
+
+/// 窗口弹出动画的速度。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PopupSpeed {
+    Fast,
+    #[default]
+    Normal,
+    Slow,
+}
+
+impl PopupSpeed {
+    /// 动画时长的倍数。
+    pub fn duration_factor(self) -> f64 {
+        match self {
+            Self::Fast => 0.5,
+            Self::Normal => 1.0,
+            Self::Slow => 2.0,
+        }
+    }
+}
+
 /// 场景中一个应用的音量。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -145,12 +196,19 @@ pub struct Settings {
     pub window_policy: WindowPolicy,
     /// 智能模式下，窗口隐藏多少秒后释放界面。
     pub smart_release_seconds: u32,
+    /// 鼠标移到任务栏上时在后台预先创建窗口，点击托盘图标即可直接显示；移出任务栏 5 秒后释放。
+    /// 只对需要新建窗口的情况（静默模式、智能模式释放后）起作用。默认开启。
+    pub prewarm_on_hover: bool,
     /// 调节系统音量后播放提示音。
     pub volume_feedback: bool,
     /// 在主界面显示调试工具（添加占位应用）。
     pub debug_tools: bool,
     /// 窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。
     pub animation_fps: Option<u32>,
+    /// 窗口弹出的方向，默认跟随任务栏位置。
+    pub popup_direction: PopupDirection,
+    pub popup_style: PopupStyle,
+    pub popup_speed: PopupSpeed,
     /// 窗口宽度（逻辑像素）。
     pub window_width: u32,
     /// 系统音量放在应用列表下方（靠近任务栏），默认开启。
@@ -199,9 +257,13 @@ impl Default for Settings {
         Self {
             window_policy: WindowPolicy::default(),
             smart_release_seconds: DEFAULT_SMART_SECONDS,
+            prewarm_on_hover: true,
             volume_feedback: true,
             debug_tools: false,
             animation_fps: None,
+            popup_direction: PopupDirection::default(),
+            popup_style: PopupStyle::default(),
+            popup_speed: PopupSpeed::default(),
             window_width: DEFAULT_WIDTH,
             master_at_bottom: true,
             apps_reversed: true,
@@ -561,9 +623,21 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.window_policy, WindowPolicy::Smart);
         assert_eq!(settings.smart_release_seconds, 300);
+        assert!(settings.prewarm_on_hover, "默认悬停任务栏时预加载窗口");
         assert!(settings.volume_feedback, "默认开启提示音");
         assert!(!settings.debug_tools, "默认关闭调试工具");
         assert_eq!(settings.animation_fps, None, "默认跟随显示器刷新率");
+        assert_eq!(
+            settings.popup_direction,
+            PopupDirection::Auto,
+            "默认跟随任务栏位置"
+        );
+        assert_eq!(
+            settings.popup_style,
+            PopupStyle::SlideFromEdge,
+            "默认从屏幕边缘滑入"
+        );
+        assert_eq!(settings.popup_speed, PopupSpeed::Normal);
         assert_eq!(settings.window_width, 340);
         assert!(settings.master_at_bottom, "默认系统音量置底，靠近任务栏");
         assert!(settings.apps_reversed, "默认倒序，活跃应用在底部");
@@ -584,9 +658,13 @@ mod tests {
         let settings = Settings {
             window_policy: WindowPolicy::Smart,
             smart_release_seconds: 60,
+            prewarm_on_hover: false,
             volume_feedback: false,
             debug_tools: true,
             animation_fps: Some(120),
+            popup_direction: PopupDirection::FromTop,
+            popup_style: PopupStyle::SlideFromEdge,
+            popup_speed: PopupSpeed::Slow,
             window_width: 400,
             master_at_bottom: true,
             apps_reversed: true,
@@ -611,7 +689,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"volumeFeedback":false,"debugTools":true,"animationFps":120,"windowWidth":400,"masterAtBottom":true,"appsReversed":true,"showPinButton":true,"showGroupButton":false,"showSceneButton":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"prewarmOnHover":false,"volumeFeedback":false,"debugTools":true,"animationFps":120,"popupDirection":"fromTop","popupStyle":"slideFromEdge","popupSpeed":"slow","windowWidth":400,"masterAtBottom":true,"appsReversed":true,"showPinButton":true,"showGroupButton":false,"showSceneButton":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
         );
     }
 

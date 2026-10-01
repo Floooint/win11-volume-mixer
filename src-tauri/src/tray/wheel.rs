@@ -6,6 +6,10 @@
 //! - 开启任务栏滚轮后一直注册，收到滚轮时判断光标下的窗口是否属于任务栏。鼠标移动也会送达，
 //!   但只读取一次输入数据就返回，不做其他处理；鼠标不动时没有任何开销。
 //!
+//! 设置项 `prewarmOnHover` 开启时同样保持注册，借鼠标移动判断光标是否进入 / 离开任务栏，
+//! 用于预加载窗口（见 `window::taskbar_hover`）。每次移动只比较光标与缓存的任务栏矩形，
+//! 进入矩形时才用 `WindowFromPoint` 确认（全屏程序可能盖住任务栏）。
+//!
 //! 每格调节的幅度、提示音和是否显示系统音量浮层由设置项 `wheelStep` / `wheelFeedback` /
 //! `wheelOsd` 决定（见 `osd.rs`）。
 //!
@@ -14,8 +18,8 @@
 
 use std::cell::RefCell;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -25,9 +29,9 @@ use windows::Win32::UI::Input::{
     RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEMOUSE, RegisterRawInputDevices,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, GA_ROOT, GetAncestor, GetClassNameW, GetCursorPos,
-    HWND_MESSAGE, RI_MOUSE_WHEEL, RegisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_INPUT,
-    WNDCLASSW, WindowFromPoint,
+    CreateWindowExW, DefWindowProcW, FindWindowExW, GA_ROOT, GetAncestor, GetClassNameW,
+    GetCursorPos, GetWindowRect, HWND_MESSAGE, RI_MOUSE_WHEEL, RegisterClassW, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_INPUT, WNDCLASSW, WindowFromPoint,
 };
 use windows_core::w;
 
@@ -49,6 +53,9 @@ const HID_USAGE_GENERIC_MOUSE: u16 = 0x02;
 /// 主任务栏和其他显示器上的任务栏的窗口类名。
 const TASKBAR_CLASSES: [&str; 2] = ["Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
 
+/// 缓存的任务栏矩形多久重新读取一次（任务栏可能移动、显示器可能变化）。
+const TASKBAR_RECTS_TTL: Duration = Duration::from_secs(2);
+
 struct Listener {
     /// 接收 `WM_INPUT` 的消息专用窗口，首次使用时创建，之后一直保留。
     hwnd: HWND,
@@ -57,6 +64,15 @@ struct Listener {
     tray: Option<Rect>,
     /// 任务栏滚轮已开启：一直保持注册。
     taskbar: bool,
+    /// 悬停任务栏时预加载窗口已开启：一直保持注册，跟踪光标是否在任务栏上。
+    prewarm: bool,
+    /// 各任务栏的矩形（物理像素）及读取时间。
+    taskbar_rects: Vec<Rect>,
+    rects_read_at: Option<Instant>,
+    /// 光标是否在某个任务栏矩形内。
+    in_taskbar_rect: bool,
+    /// 已通知窗口模块的“光标在任务栏上”状态。
+    over_taskbar: bool,
     registered: bool,
     /// 尚未凑满一格的滚轮增量。
     remainder: i32,
@@ -65,6 +81,9 @@ struct Listener {
 thread_local! {
     static LISTENER: RefCell<Option<Listener>> = const { RefCell::new(None) };
 }
+
+/// 最新的“光标在任务栏上”状态。通知经异步任务转发，先后可能颠倒，执行时以这里为准。
+static OVER_TASKBAR: AtomicBool = AtomicBool::new(false);
 
 /// 每次滚动加一，延迟播放提示音时据此判断滚轮是否已停止。
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -80,6 +99,11 @@ fn with_listener(app: &AppHandle, f: impl FnOnce(&mut Listener)) {
                         app: app.clone(),
                         tray: None,
                         taskbar: false,
+                        prewarm: false,
+                        taskbar_rects: Vec::new(),
+                        rects_read_at: None,
+                        in_taskbar_rect: false,
+                        over_taskbar: false,
                         registered: false,
                         remainder: 0,
                     })
@@ -122,10 +146,24 @@ pub fn set_taskbar(app: &AppHandle, enabled: bool) {
     });
 }
 
+/// 开启或关闭悬停任务栏时预加载窗口。只能在主线程调用。
+pub fn set_prewarm(app: &AppHandle, enabled: bool) {
+    with_listener(app, |listener| {
+        listener.prewarm = enabled;
+        if !enabled {
+            listener.in_taskbar_rect = false;
+            listener.over_taskbar = false;
+            OVER_TASKBAR.store(false, Ordering::SeqCst);
+            crate::window::stop_prewarm(app);
+        }
+        listener.update();
+    });
+}
+
 impl Listener {
-    /// 需要监听（鼠标在托盘图标上，或开启了任务栏滚轮）时注册，否则注销。
+    /// 需要监听（鼠标在托盘图标上，或开启了任务栏滚轮 / 预加载）时注册，否则注销。
     fn update(&mut self) {
-        let wanted = self.taskbar || self.tray.is_some();
+        let wanted = self.taskbar || self.prewarm || self.tray.is_some();
         if wanted == self.registered {
             return;
         }
@@ -148,6 +186,9 @@ impl Listener {
 
     /// 处理一次鼠标输入。只发送请求，不等待结果。
     fn on_input(&mut self, wheel_delta: Option<i32>) {
+        if self.prewarm {
+            self.track_taskbar_hover();
+        }
         // 只开启了托盘图标滚轮时，每次输入都检查光标是否仍在图标上，移出即注销。
         let on_tray = || {
             self.tray
@@ -193,6 +234,64 @@ impl Listener {
             schedule_feedback(self.app.clone());
         }
     }
+}
+
+impl Listener {
+    /// 光标进入或离开任务栏时通知窗口模块。
+    fn track_taskbar_hover(&mut self) {
+        let Some(pt) = cursor() else {
+            return;
+        };
+        if self
+            .rects_read_at
+            .is_none_or(|t| t.elapsed() > TASKBAR_RECTS_TTL)
+        {
+            self.taskbar_rects = taskbar_rects();
+            self.rects_read_at = Some(Instant::now());
+        }
+        let in_rect = self.taskbar_rects.iter().any(|rect| contains(rect, pt));
+        if in_rect == self.in_taskbar_rect {
+            return;
+        }
+        self.in_taskbar_rect = in_rect;
+        let over = in_rect && over_taskbar(pt);
+        if over == self.over_taskbar {
+            return;
+        }
+        self.over_taskbar = over;
+        OVER_TASKBAR.store(over, Ordering::SeqCst);
+        // 这里在窗口过程内，不能直接创建 WebView（创建期间会处理消息，出错时也无法跨过系统回调展开）。
+        // 在主线程上调用 `run_on_main_thread` 会立即执行，因此先转到异步任务，再由它投递回事件循环。
+        let app = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                crate::window::taskbar_hover(&handle, OVER_TASKBAR.load(Ordering::SeqCst));
+            });
+        });
+    }
+}
+
+/// 所有任务栏（主任务栏和其他显示器上的任务栏）的窗口矩形。
+fn taskbar_rects() -> Vec<Rect> {
+    let mut rects = Vec::new();
+    for class in [w!("Shell_TrayWnd"), w!("Shell_SecondaryTrayWnd")] {
+        let mut after = None;
+        // SAFETY: 只查找顶层窗口并读取其矩形；窗口随时可能消失，失败时跳过。
+        while let Ok(hwnd) = unsafe { FindWindowExW(None, after, class, None) } {
+            let mut rect = Default::default();
+            if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
+                rects.push(Rect {
+                    x: rect.left.into(),
+                    y: rect.top.into(),
+                    width: (rect.right - rect.left).into(),
+                    height: (rect.bottom - rect.top).into(),
+                });
+            }
+            after = Some(hwnd);
+        }
+    }
+    rects
 }
 
 fn cursor() -> Option<POINT> {
