@@ -1,6 +1,6 @@
 [package]
 name = "win11-volume-mixer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Windows 11 轻量级应用音量控制器"
 authors = ["Floooint"]
 repository = "https://github.com/Floooint/win11-volume-mixer"
