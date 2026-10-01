@@ -111,6 +111,37 @@ docs/                 项目文档（仅本地保留，已在 .gitignore 中排�
 2. 前端类型检查和 lint 通过。
 3. 涉及音频逻辑时，手动对照系统音量合成器验证：调节、静音、外部修改同步、切换输出设备。
 
+## 发布新版本
+
+安装包由 GitHub Actions 构建（[.github/workflows/release.yml](.github/workflows/release.yml)），本地不需要打包。
+
+版本号规则：`主版本.次版本.修订号`。只修 bug 加修订号（0.2.0 → 0.2.1），加新功能加次版本号（0.2.1 → 0.3.0）。
+
+1. 确认要发布的改动都已提交，并通过上面的验证流程。
+2. 改版本号，以下几处必须一致：
+   - `package.json` 的 `"version"`
+   - `src-tauri/tauri.conf.json` 的 `"version"`（关于页显示的版本号取自这里）
+   - `src-tauri/Cargo.toml` 的 `version`，改完在 `src-tauri/` 下运行一次 `cargo check`，让 `Cargo.lock` 跟着更新
+   - `README.md` 中便携版的文件名 `win11-volume-mixer_<版本>_x64_portable.exe`
+3. 提交：`git commit -am "chore: 版本 X.Y.Z"`。
+4. 打标签并推送，推送标签后开始自动构建：
+
+   ```text
+   git tag vX.Y.Z
+   git push origin main
+   git push origin vX.Y.Z
+   ```
+
+5. 在 GitHub 仓库的 Actions 页面等待“发布”流程完成（约 10–15 分钟）。流程会检查标签与 `tauri.conf.json` 中的版本号是否一致，再运行类型检查、单元测试并构建。
+6. 在 Releases 页面打开自动创建的草稿：检查附件里是否有安装包 `*_x64-setup.exe` 和便携版 `*_x64_portable.exe`，补充更新说明（面向用户，写清新功能和修复了什么），点“Publish release”发布。
+
+注意：
+
+- 标签一旦推送就不要再移动或删除重建，发现问题直接发下一个修订版本。
+- 构建失败时，在 Actions 中打开失败的运行记录查看日志，修复后删除远程和本地的标签（`git push origin :refs/tags/vX.Y.Z`、`git tag -d vX.Y.Z`），再从第 4 步重新开始。这是唯一允许重建标签的情况：版本还没有发布。
+- 想在发布前确认能否构建成功，可在 Actions 页面选择“发布”流程，点“Run workflow”手动运行。手动运行不创建 Release，构建好的文件在运行记录的 Artifacts 中下载。
+- 程序没有自动更新：用户重新运行新的安装包即可覆盖安装，设置保留；便携版替换 exe 即可（`settings.json` 与 exe 在同一目录）。
+
 ## 文档编码
 
 - 所有 Markdown 文件使用 UTF-8 编码。
