@@ -5,6 +5,7 @@ import {
   type AudioSnapshot,
   commands,
   events,
+  type OutputRole,
   type VolumeState,
 } from "@/bindings";
 import { initialState } from "@/lib/initial-state";
@@ -29,6 +30,8 @@ type AudioState = {
    */
   setGroupVolume: (apps: [string, number][], volume: number) => void;
   setGroupMute: (appIds: string[], muted: boolean) => void;
+  /** 切换默认输出设备。切换后后端推送新设备的完整快照，这里不做乐观更新。 */
+  setDefaultOutput: (deviceId: string, role: OutputRole) => Promise<void>;
   clearError: () => void;
 };
 
@@ -113,6 +116,7 @@ export const useAudioStore = create<AudioState>((set, get) => {
       const listeners = Promise.all([
         events.audioSnapshot.listen((e) => set({ snapshot: e.payload })),
         events.audioMaster.listen((e) => applyMaster(e.payload)),
+        events.audioOutputs.listen((e) => update((s) => ({ ...s, outputs: e.payload }))),
         events.audioAppUpsert.listen((e) => applyUpsert(e.payload)),
         events.audioAppRemove.listen((e) => applyRemove(e.payload.appId)),
       ]).catch((e: unknown) => {
@@ -157,6 +161,10 @@ export const useAudioStore = create<AudioState>((set, get) => {
         () => appIds.forEach((appId) => applyApp(appId, { muted })),
         () => commands.setGroupMute(appIds, muted),
       ),
+    setDefaultOutput: async (deviceId, role) => {
+      const result = await commands.setDefaultOutput(deviceId, role);
+      if (result.status === "error") set({ error: result.error.message });
+    },
     retry: load,
     clearError: () => {
       if (get().error) set({ error: null });

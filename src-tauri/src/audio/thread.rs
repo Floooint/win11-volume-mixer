@@ -18,8 +18,9 @@ use windows_core::Interface;
 
 use super::aggregate::{self, SessionData};
 use super::device::{Device, DeviceNotifier};
+use super::outputs;
 use super::session::{self, SessionNotifier, TrackedSession};
-use super::types::{AudioSnapshot, DeviceInfo, VolumeState};
+use super::types::{AudioSnapshot, DeviceInfo, OutputDevice, VolumeState};
 use super::{Command, MasterStatus, Msg, Reply, Update};
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -103,6 +104,8 @@ struct State {
     enumerator: IMMDeviceEnumerator,
     device_notifier: IMMNotificationClient,
     device: Option<Device>,
+    /// 输出设备列表，设备变化时重新读取。
+    outputs: Vec<OutputDevice>,
     session_notifier: Option<IAudioSessionNotification>,
     /// 以会话实例标识为键。
     sessions: HashMap<String, TrackedSession>,
@@ -111,6 +114,8 @@ struct State {
     pending: Pending,
     /// 最近一次推送给托盘的系统音量状态；外层 `None` 表示尚未推送过。
     reported_master: Option<Option<MasterStatus>>,
+    /// 最近一次推送给托盘的输出设备列表。
+    reported_outputs: Option<Vec<OutputDevice>>,
 }
 
 impl State {
@@ -126,19 +131,23 @@ impl State {
             enumerator,
             device_notifier,
             device: None,
+            outputs: Vec::new(),
             session_notifier: None,
             sessions: HashMap::new(),
             last: AudioSnapshot {
                 device: None,
+                outputs: Vec::new(),
                 apps: Vec::new(),
             },
             pending: Pending::default(),
             reported_master: None,
+            reported_outputs: None,
         };
         // 打开设备失败时按“没有设备”继续运行，之后设备变化时会重试；
         // 若直接返回错误，音频线程会退出，程序只能重启才能恢复。
         let result = state.open_device();
         state.log_err(result);
+        state.refresh_outputs();
         state.last = state.snapshot();
         state.report_master();
         Ok(state)
@@ -211,15 +220,16 @@ impl State {
                 self.sessions.remove(&session_id);
                 self.mark_dirty(false);
             }
-            // 只有当前设备改名时才需要重建（列表和托盘显示设备名）。
+            // 当前设备改名时需要重建（列表和托盘显示设备名），其他设备改名只更新输出设备列表。
             Msg::DeviceRenamed { device_id }
-                if self.device.as_ref().is_none_or(|d| d.id != device_id) => {}
-            Msg::DefaultDeviceChanged | Msg::DeviceRenamed { .. } => {
-                self.close_device();
-                let result = self.open_device();
-                self.log_err(result);
-                self.report_master();
-                self.mark_dirty(true);
+                if self.device.as_ref().is_some_and(|d| d.id == device_id) =>
+            {
+                self.rebuild_device();
+            }
+            Msg::DefaultDeviceChanged => self.rebuild_device(),
+            Msg::OutputsChanged | Msg::DeviceRenamed { .. } => {
+                self.refresh_outputs();
+                self.mark_dirty(false);
             }
         }
         true
@@ -301,6 +311,10 @@ impl State {
                     patch_app(last, &app_id, |v| v.muted = muted);
                 });
             }
+            // 切换成功后系统发出 `OnDefaultDeviceChanged`，由它重建并推送完整快照。
+            Command::SetDefaultOutput(device_id, role, reply) => {
+                let _ = reply.send(outputs::set_default(&device_id, role).map_err(Into::into));
+            }
             Command::Shutdown => unreachable!("在 handle 中处理"),
         }
     }
@@ -338,6 +352,9 @@ impl State {
             if let Some(master) = diff.master {
                 (self.emit)(Update::Master(master));
             }
+            if let Some(outputs) = diff.outputs {
+                (self.emit)(Update::Outputs(outputs));
+            }
             for app in diff.upserts {
                 (self.emit)(Update::AppUpsert(app));
             }
@@ -351,6 +368,7 @@ impl State {
     /// 系统音量状态有变化时推送给托盘。
     fn report_master(&mut self) {
         let status = self.device.as_ref().map(|d| MasterStatus {
+            device_id: d.id.clone(),
             device_name: d.name.clone(),
             volume: d.master().unwrap_or(VolumeState {
                 volume: 0.0,
@@ -367,6 +385,7 @@ impl State {
         let Some(device) = &self.device else {
             return AudioSnapshot {
                 device: None,
+                outputs: self.outputs.clone(),
                 apps: Vec::new(),
             };
         };
@@ -399,6 +418,7 @@ impl State {
                 name: device.name.clone(),
                 master,
             }),
+            outputs: self.outputs.clone(),
             apps,
         }
     }
@@ -421,6 +441,27 @@ impl State {
         }
         // 注册新会话通知后必须枚举一次，通知才会开始触发。
         self.refresh_sessions()
+    }
+
+    fn rebuild_device(&mut self) {
+        self.close_device();
+        let result = self.open_device();
+        self.log_err(result);
+        self.refresh_outputs();
+        self.report_master();
+        self.mark_dirty(true);
+    }
+
+    /// 读取失败时保留原来的列表。有变化时推送给托盘菜单。
+    fn refresh_outputs(&mut self) {
+        match outputs::list(&self.enumerator) {
+            Ok(outputs) => self.outputs = outputs,
+            Err(e) => eprintln!("[audio] 读取输出设备列表失败：{e}"),
+        }
+        if self.reported_outputs.as_ref() != Some(&self.outputs) {
+            self.reported_outputs = Some(self.outputs.clone());
+            (self.emit)(Update::TrayOutputs(self.outputs.clone()));
+        }
     }
 
     fn close_device(&mut self) {
@@ -556,6 +597,7 @@ fn coalesce_requests(batch: Vec<Msg>) -> Vec<Msg> {
     let mut last_index = HashMap::new();
     let mut last_rebuild = None;
     let mut last_refresh = None;
+    let mut last_outputs = None;
     for (i, msg) in batch.iter().enumerate() {
         if let Some(target) = target(msg) {
             last_index.insert(target, i);
@@ -563,6 +605,7 @@ fn coalesce_requests(batch: Vec<Msg>) -> Vec<Msg> {
         match msg {
             Msg::DefaultDeviceChanged => last_rebuild = Some(i),
             Msg::SessionCreated => last_refresh = Some(i),
+            Msg::OutputsChanged => last_outputs = Some(i),
             _ => {}
         }
     }
@@ -570,10 +613,12 @@ fn coalesce_requests(batch: Vec<Msg>) -> Vec<Msg> {
     batch
         .into_iter()
         .enumerate()
-        // 重建设备和重新枚举会话都读取完整状态，同一批中只需执行最后一次。
+        // 重建设备、重新枚举会话、读取输出设备列表都读取完整状态，同一批中只需执行最后一次。
+        // 插拔设备时系统会连续发出多个通知；重建设备时也会读取输出设备列表。
         .filter(|(i, msg)| match msg {
             Msg::DefaultDeviceChanged => last_rebuild == Some(*i),
             Msg::SessionCreated => last_refresh == Some(*i),
+            Msg::OutputsChanged => last_rebuild.is_none() && last_outputs == Some(*i),
             _ => true,
         })
         .filter_map(|(i, msg)| match target(&msg) {
@@ -649,5 +694,21 @@ mod tests {
         assert!(matches!(kept[0], Msg::MasterChanged { is_self: false }));
         assert!(matches!(kept[1], Msg::DefaultDeviceChanged));
         assert!(matches!(kept[2], Msg::SessionCreated));
+    }
+
+    #[test]
+    fn 同一批中输出设备列表只读取一次() {
+        let kept = coalesce_requests(vec![
+            Msg::OutputsChanged,
+            Msg::SessionCreated,
+            Msg::OutputsChanged,
+        ]);
+        assert_eq!(kept.len(), 2);
+        assert!(matches!(kept[1], Msg::OutputsChanged));
+
+        // 重建设备时会一并读取，不再单独读取。
+        let kept = coalesce_requests(vec![Msg::OutputsChanged, Msg::DefaultDeviceChanged]);
+        assert_eq!(kept.len(), 1);
+        assert!(matches!(kept[0], Msg::DefaultDeviceChanged));
     }
 }

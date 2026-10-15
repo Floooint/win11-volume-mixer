@@ -9,8 +9,8 @@ use windows::Win32::Media::Audio::Endpoints::{
 };
 use windows::Win32::Media::Audio::{
     AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE, EDataFlow, ERole, IAudioSessionManager2,
-    IMMDevice, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, eConsole,
-    eRender,
+    IMMDevice, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl,
+    eCommunications, eConsole, eRender,
 };
 use windows::Win32::System::Com::{CLSCTX_ALL, STGM_READ};
 use windows_core::{PCWSTR, Result, implement};
@@ -86,7 +86,7 @@ impl Drop for Device {
     }
 }
 
-fn friendly_name(device: &IMMDevice) -> Result<String> {
+pub fn friendly_name(device: &IMMDevice) -> Result<String> {
     unsafe {
         let store = device.OpenPropertyStore(STGM_READ)?;
         let value = store.GetValue(&PKEY_Device_FriendlyName)?;
@@ -118,15 +118,19 @@ pub struct DeviceNotifier {
 }
 
 impl IMMNotificationClient_Impl for DeviceNotifier_Impl {
+    // 设备插拔、启用或禁用：输出设备列表需要更新。
     fn OnDeviceStateChanged(&self, _device_id: &PCWSTR, _state: DEVICE_STATE) -> Result<()> {
+        let _ = self.tx.send(Msg::OutputsChanged);
         Ok(())
     }
 
     fn OnDeviceAdded(&self, _device_id: &PCWSTR) -> Result<()> {
+        let _ = self.tx.send(Msg::OutputsChanged);
         Ok(())
     }
 
     fn OnDeviceRemoved(&self, _device_id: &PCWSTR) -> Result<()> {
+        let _ = self.tx.send(Msg::OutputsChanged);
         Ok(())
     }
 
@@ -136,15 +140,17 @@ impl IMMNotificationClient_Impl for DeviceNotifier_Impl {
         role: ERole,
         _device_id: &PCWSTR,
     ) -> Result<()> {
-        // 每个角色都会各通知一次，只关心 eConsole，避免重复重建。
+        // 每个角色都会各通知一次，只在 eConsole 时重建；通信设备变化只需更新输出设备列表。
         if flow == eRender && role == eConsole {
             let _ = self.tx.send(Msg::DefaultDeviceChanged);
+        } else if flow == eRender && role == eCommunications {
+            let _ = self.tx.send(Msg::OutputsChanged);
         }
         Ok(())
     }
 
     fn OnPropertyValueChanged(&self, device_id: &PCWSTR, key: &PROPERTYKEY) -> Result<()> {
-        // 设备在系统设置中被改名（音频线程只处理当前设备）。其他属性变化很频繁，不处理。
+        // 设备在系统设置中被改名。其他属性变化很频繁，不处理。
         if *key == PKEY_Device_FriendlyName {
             let device_id = unsafe { device_id.to_string() }.unwrap_or_default();
             let _ = self.tx.send(Msg::DeviceRenamed { device_id });

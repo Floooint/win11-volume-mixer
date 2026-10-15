@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 type VolumeRowProps = {
   name: string;
   /** 名称下方的补充说明，如设备名或“2 个会话”。 */
-  detail?: string;
+  detail?: ReactNode;
   volume: VolumeState;
   onVolumeChange: (volume: number) => void;
   onMuteChange: (muted: boolean) => void;
@@ -172,7 +172,12 @@ export function VolumeRow({
             {trailing}
           </div>
         </div>
-        {detail && <p className="truncate text-xs text-muted-foreground">{detail}</p>}
+        {detail &&
+          (typeof detail === "string" ? (
+            <p className="truncate text-xs text-muted-foreground">{detail}</p>
+          ) : (
+            detail
+          ))}
         {/* 静音按钮和滑块一行用于调节音量：点在这里（包括轨道、按钮之间的空隙）不切换应用详情。 */}
         <div
           data-no-details

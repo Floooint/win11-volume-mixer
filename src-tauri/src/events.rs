@@ -5,7 +5,7 @@ use specta::Type;
 use tauri::AppHandle;
 use tauri_specta::Event;
 
-use crate::audio::{AppAudio, AudioSnapshot, Update, VolumeState};
+use crate::audio::{AppAudio, AudioSnapshot, OutputDevice, Update, VolumeState};
 
 /// 设备切换或需要整体重建时推送完整状态。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
@@ -16,6 +16,11 @@ pub struct AudioSnapshotEvent(pub AudioSnapshot);
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 #[tauri_specta(event_name = "audio://master")]
 pub struct MasterChangedEvent(pub VolumeState);
+
+/// 输出设备列表变化（插拔、改名、默认通信设备变化）。默认设备变化时推送完整快照。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[tauri_specta(event_name = "audio://outputs")]
+pub struct OutputsChangedEvent(pub Vec<OutputDevice>);
 
 /// 应用出现或状态变化。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
@@ -34,10 +39,11 @@ pub fn emit(app: &AppHandle, update: Update) {
     let result = match update {
         Update::Snapshot(snapshot) => AudioSnapshotEvent(snapshot).emit(app),
         Update::Master(master) => MasterChangedEvent(master).emit(app),
+        Update::Outputs(outputs) => OutputsChangedEvent(outputs).emit(app),
         Update::AppUpsert(audio) => AppUpsertEvent(audio).emit(app),
         Update::AppRemove(app_id) => AppRemoveEvent { app_id }.emit(app),
-        // 只用于托盘图标，由 lib.rs 转给 tray 模块，不推送给前端。
-        Update::MasterStatus(_) => Ok(()),
+        // 只用于托盘，由 lib.rs 转给 tray 模块，不推送给前端。
+        Update::MasterStatus(_) | Update::TrayOutputs(_) => Ok(()),
     };
     if let Err(e) = result {
         eprintln!("[events] 推送失败：{e}");

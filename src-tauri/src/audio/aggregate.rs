@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::app_info::AppInfo;
-use super::types::{AppAudio, AudioSnapshot, DeviceInfo, VolumeState};
+use super::types::{AppAudio, AudioSnapshot, DeviceInfo, OutputDevice, VolumeState};
 
 /// 聚合前的单个会话数据。
 pub struct SessionData<'a> {
@@ -57,6 +57,7 @@ pub fn scaled_volumes(apps: &[(String, f32)], group_volume: f32) -> Vec<(&str, f
 #[derive(Debug, Default, PartialEq)]
 pub struct Diff {
     pub master: Option<VolumeState>,
+    pub outputs: Option<Vec<OutputDevice>>,
     pub upserts: Vec<AppAudio>,
     pub removals: Vec<String>,
 }
@@ -64,7 +65,10 @@ pub struct Diff {
 #[cfg(test)]
 impl Diff {
     pub fn is_empty(&self) -> bool {
-        self.master.is_none() && self.upserts.is_empty() && self.removals.is_empty()
+        self.master.is_none()
+            && self.outputs.is_none()
+            && self.upserts.is_empty()
+            && self.removals.is_empty()
     }
 }
 
@@ -78,6 +82,7 @@ pub fn diff(old: &AudioSnapshot, new: &AudioSnapshot) -> Diff {
         (Some(old), Some(new)) if old.master != new.master => Some(new.master),
         _ => None,
     };
+    let outputs = (old.outputs != new.outputs).then(|| new.outputs.clone());
 
     let old_apps: HashMap<&str, &AppAudio> = old
         .apps
@@ -102,6 +107,7 @@ pub fn diff(old: &AudioSnapshot, new: &AudioSnapshot) -> Diff {
 
     Diff {
         master,
+        outputs,
         upserts,
         removals,
     }
@@ -191,6 +197,7 @@ mod tests {
                 name: "扬声器".into(),
                 master,
             }),
+            outputs: Vec::new(),
             apps,
         }
     }

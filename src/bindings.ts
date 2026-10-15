@@ -15,6 +15,11 @@ export const commands = {
 	/**  组音量：`apps` 为组内应用及其在组音量 100% 时的音量，按比例缩放后写入。 */
 	setGroupVolume: (apps: ([string, number])[], volume: number) => typedError<null, AppError>(__TAURI_INVOKE("set_group_volume", { apps: apps.map(i=>i), volume })),
 	setGroupMute: (appIds: string[], muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_group_mute", { appIds, muted })),
+	/**
+	 *  切换默认输出设备。播放设备变化后推送 `audio://snapshot`（新设备的完整状态），
+	 *  只有通话设备变化时推送 `audio://outputs`。
+	 */
+	setDefaultOutput: (deviceId: string, role: OutputRole) => typedError<null, AppError>(__TAURI_INVOKE("set_default_output", { deviceId, role })),
 	/**  前端首次渲染完成。新建的窗口在此之后才显示，避免出现空白窗口。 */
 	windowReady: () => __TAURI_INVOKE<void>("window_ready"),
 	/**  新建窗口内容就绪，报告前端各阶段的时间点，后端输出分段耗时（见 `timing.rs`）。 */
@@ -75,6 +80,7 @@ export const events = {
 	audioAppRemove: makeEvent<AppRemoveEvent>("audio://app-remove"),
 	audioAppUpsert: makeEvent<AppUpsertEvent>("audio://app-upsert"),
 	audioMaster: makeEvent<MasterChangedEvent>("audio://master"),
+	audioOutputs: makeEvent<OutputsChangedEvent>("audio://outputs"),
 	audioSnapshot: makeEvent<AudioSnapshotEvent>("audio://snapshot"),
 	detailsShow: makeEvent<AppDetailsEvent>("details://show"),
 	themeAccent: makeEvent<AccentColors>("theme://accent"),
@@ -151,6 +157,8 @@ export type AppUpsertEvent = AppAudio;
 export type AudioSnapshot = {
 	/**  没有任何输出设备时为 `None`。 */
 	device: DeviceInfo | null,
+	/**  可用的输出设备（不含已断开、已禁用的），按名称排序。 */
+	outputs: OutputDevice[],
 	/**  已按“活跃在前，再按名称”排序。 */
 	apps: AppAudio[],
 };
@@ -190,6 +198,41 @@ export type GroupMember = {
 /**  系统总音量被外部修改。 */
 export type MasterChangedEvent = VolumeState;
 
+/**  重命名的输出设备。`name` 为设备原来的名称，设备断开时设置页也能显示。 */
+export type OutputAlias = {
+	id: string,
+	name: string,
+	/**  用户起的名称，界面和托盘中优先显示。 */
+	alias: string,
+};
+
+export type OutputDevice = {
+	id: string,
+	name: string,
+	kind: OutputKind,
+	/**  是默认设备（`eConsole` 角色）。 */
+	isDefault: boolean,
+	/**  是默认通信设备（`eCommunications` 角色）。 */
+	isCommunications: boolean,
+};
+
+/**  输出设备的类型，界面据此显示图标。 */
+export type OutputKind = "speakers" | "headphones" | 
+/**  显示器（HDMI / DisplayPort）。 */
+"display";
+
+/**  切换默认输出设备时设置哪些角色。 */
+export type OutputRole = 
+/**  默认设备和默认通信设备。 */
+"all" | 
+/**  只设为默认设备。 */
+"default" | 
+/**  只设为默认通信设备。 */
+"communications";
+
+/**  输出设备列表变化（插拔、改名、默认通信设备变化）。默认设备变化时推送完整快照。 */
+export type OutputsChangedEvent = OutputDevice[];
+
 /**  窗口固定方式，由标题栏的图钉按钮切换，只在本次运行中保持。 */
 export type PinMode = 
 /**  弹出面板：失焦自动隐藏，保持在最前。 */
@@ -227,6 +270,12 @@ export type PopupStyle =
 /**  置顶或隐藏的应用。记下名称，应用没在运行时也能在设置页中显示。 */
 export type SavedApp = {
 	appId: string,
+	name: string,
+};
+
+/**  隐藏的输出设备。记下名称，设备断开时也能在设置页中显示。 */
+export type SavedOutput = {
+	id: string,
 	name: string,
 };
 
@@ -298,6 +347,10 @@ export type Settings_Deserialize = {
 	appAliases?: AppAlias[],
 	/**  音量场景，按显示顺序排列。 */
 	scenes?: Scene[],
+	/**  不在输出设备列表中显示的设备。 */
+	hiddenOutputs?: SavedOutput[],
+	/**  重命名的输出设备。 */
+	outputAliases?: OutputAlias[],
 	trayStyle?: TrayStyle,
 	/**  在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。 */
 	taskbarWheel?: boolean,
@@ -362,6 +415,10 @@ export type Settings_Serialize = {
 	appAliases: AppAlias[],
 	/**  音量场景，按显示顺序排列。 */
 	scenes: Scene[],
+	/**  不在输出设备列表中显示的设备。 */
+	hiddenOutputs: SavedOutput[],
+	/**  重命名的输出设备。 */
+	outputAliases: OutputAlias[],
 	trayStyle: TrayStyle,
 	/**  在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。 */
 	taskbarWheel: boolean,

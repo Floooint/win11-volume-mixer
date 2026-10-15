@@ -1,10 +1,14 @@
+import { ChevronRight } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   commands,
+  type OutputAlias,
+  type OutputDevice,
   type PopupDirection,
   type PopupSpeed,
   type PopupStyle,
   type SavedApp,
+  type SavedOutput,
   type ThemeMode,
   type TrayStyle,
   type WindowPolicy_Serialize as WindowPolicy,
@@ -12,7 +16,9 @@ import {
 import { AboutSection } from "@/components/AboutSection";
 import { ArrowLeft } from "@/components/animate-ui/icons/arrow-left";
 import { ColorPicker, CustomSwatch } from "@/components/ColorPicker";
+import { Expand } from "@/components/Expand";
 import { IconButton } from "@/components/IconButton";
+import { OutputIcon } from "@/components/OutputPicker";
 import { Tooltip } from "@/components/Tooltip";
 import {
   NumberInput,
@@ -385,14 +391,107 @@ function SavedAppList({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** 一组设置。`collapsible` 时点击标题展开 / 折叠，默认折叠。 */
+function Section({
+  title,
+  collapsible = false,
+  children,
+}: {
+  title: string;
+  collapsible?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const card = (
+    <div className="mr-1 ml-3 flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
+      {children}
+    </div>
+  );
+  if (!collapsible) {
+    return (
+      <section>
+        <h2 className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">{title}</h2>
+        {card}
+      </section>
+    );
+  }
   return (
     <section>
-      <h2 className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">{title}</h2>
-      <div className="mr-1 ml-3 flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
-        {children}
-      </div>
+      <h2 className="px-3 pt-3 pb-1">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className={cn(
+            "flex items-center gap-0.5 rounded px-1 text-xs font-medium text-muted-foreground",
+            "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          )}
+        >
+          {title}
+          <ChevronRight
+            size={14}
+            className={cn("transition-transform duration-150", open && "rotate-90")}
+          />
+        </button>
+      </h2>
+      <Expand open={open}>{card}</Expand>
     </section>
+  );
+}
+
+/**
+ * 输出设备管理：当前可用的设备，加上已隐藏但没有连接的设备。隐藏的设备不出现在主界面的
+ * 输出设备列表中（当前设备除外）。
+ */
+function OutputList({
+  outputs,
+  hidden,
+  aliases,
+  onChange,
+}: {
+  outputs: OutputDevice[];
+  hidden: SavedOutput[];
+  aliases: OutputAlias[];
+  onChange: (output: SavedOutput, hidden: boolean) => void;
+}) {
+  const hiddenIds = new Set(hidden.map((o) => o.id));
+  const rows = [
+    ...outputs.map((o) => ({ id: o.id, name: o.name, kind: o.kind, connected: true })),
+    ...hidden
+      .filter((h) => !outputs.some((o) => o.id === h.id))
+      .map((h) => ({ id: h.id, name: h.name, kind: null, connected: false })),
+  ];
+  const displayName = (id: string, name: string) =>
+    aliases.find((a) => a.id === id)?.alias ?? name;
+  return (
+    <ul className="flex flex-col">
+      {rows.map((row) => {
+        const isHidden = hiddenIds.has(row.id);
+        return (
+          <li key={row.id} className="flex items-center justify-between gap-2 py-0.5">
+            <span
+              className={cn(
+                "flex min-w-0 items-center gap-2",
+                isHidden && "text-muted-foreground",
+              )}
+            >
+              {row.kind && <OutputIcon kind={row.kind} />}
+              <Tooltip content={displayName(row.id, row.name)} onlyWhenTruncated>
+                <span className="truncate">{displayName(row.id, row.name)}</span>
+              </Tooltip>
+              {!row.connected && <span className="shrink-0 text-xs">（未连接）</span>}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange({ id: row.id, name: row.name }, !isHidden)}
+              className="shrink-0 rounded-md px-2 py-0.5 text-xs text-primary hover:bg-accent"
+            >
+              {isHidden ? "显示" : "隐藏"}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -406,6 +505,9 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
   const unhideApp = useSettingsStore((s) => s.unhideApp);
   const renameApp = useSettingsStore((s) => s.renameApp);
   const deleteScene = useSettingsStore((s) => s.deleteScene);
+  const setOutputHidden = useSettingsStore((s) => s.setOutputHidden);
+  const renameOutput = useSettingsStore((s) => s.renameOutput);
+  const outputs = useAudioStore((s) => s.snapshot?.outputs);
   const [refreshRate, setRefreshRate] = useState<number | null>(null);
   /** 本次在设置页改过“硬件加速”，提示需要重启。 */
   const [restartNeeded, setRestartNeeded] = useState(false);
@@ -696,7 +798,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 settings.hiddenApps.length > 0 ||
                 settings.appAliases.length > 0 ||
                 settings.scenes.length > 0) && (
-                <Section title="应用">
+                <Section title="应用" collapsible>
                   {settings.pinnedApps.length > 0 && (
                     <SettingRow
                       title="置顶的应用"
@@ -754,6 +856,44 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                           }))}
                           actionLabel="删除"
                           onAction={(sceneId) => void deleteScene(sceneId)}
+                        />
+                      }
+                    />
+                  )}
+                </Section>
+              )}
+
+              {((outputs?.length ?? 0) > 0 ||
+                settings.hiddenOutputs.length > 0 ||
+                settings.outputAliases.length > 0) && (
+                <Section title="输出设备" collapsible>
+                  <SettingRow
+                    title="在列表中显示"
+                    help="点击主界面系统音量下方的设备名，可切换输出设备。隐藏的设备不在其中显示，不影响系统设置"
+                    below={
+                      <OutputList
+                        outputs={outputs ?? []}
+                        hidden={settings.hiddenOutputs}
+                        aliases={settings.outputAliases}
+                        onChange={(output, hidden) => void setOutputHidden(output, hidden)}
+                      />
+                    }
+                  />
+                  {settings.outputAliases.length > 0 && (
+                    <SettingRow
+                      title="重命名的设备"
+                      help="在主界面右键系统音量或输出设备列表中的设备，选择“重命名”。只改变本程序中显示的名称"
+                      below={
+                        <SavedAppList
+                          apps={settings.outputAliases.map((a) => ({
+                            appId: a.id,
+                            name: `${a.alias}（${a.name}）`,
+                          }))}
+                          actionLabel="恢复原名"
+                          onAction={(id) => {
+                            const output = settings.outputAliases.find((a) => a.id === id);
+                            if (output) void renameOutput(output, null);
+                          }}
                         />
                       }
                     />

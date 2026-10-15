@@ -152,6 +152,24 @@ pub struct SavedApp {
     pub name: String,
 }
 
+/// 隐藏的输出设备。记下名称，设备断开时也能在设置页中显示。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedOutput {
+    pub id: String,
+    pub name: String,
+}
+
+/// 重命名的输出设备。`name` 为设备原来的名称，设备断开时设置页也能显示。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputAlias {
+    pub id: String,
+    pub name: String,
+    /// 用户起的名称，界面和托盘中优先显示。
+    pub alias: String,
+}
+
 /// 重命名的应用。`name` 为原来的应用名，应用没在运行时设置页也能显示。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -237,6 +255,10 @@ pub struct Settings {
     pub app_aliases: Vec<AppAlias>,
     /// 音量场景，按显示顺序排列。
     pub scenes: Vec<Scene>,
+    /// 不在输出设备列表中显示的设备。
+    pub hidden_outputs: Vec<SavedOutput>,
+    /// 重命名的输出设备。
+    pub output_aliases: Vec<OutputAlias>,
     pub tray_style: TrayStyle,
     /// 在任务栏任意位置滚动滚轮调节系统音量（默认只在托盘图标上）。
     pub taskbar_wheel: bool,
@@ -278,6 +300,8 @@ impl Default for Settings {
             groups: Vec::new(),
             app_aliases: Vec::new(),
             scenes: Vec::new(),
+            hidden_outputs: Vec::new(),
+            output_aliases: Vec::new(),
             tray_style: TrayStyle::default(),
             taskbar_wheel: true,
             wheel_step: DEFAULT_WHEEL_STEP,
@@ -305,6 +329,14 @@ impl Settings {
         self.groups = normalized_groups(self.groups);
         self.app_aliases = normalized_aliases(self.app_aliases);
         self.scenes = normalized_scenes(self.scenes);
+        let mut seen = std::collections::HashSet::new();
+        self.hidden_outputs
+            .retain(|output| seen.insert(output.id.clone()));
+        let mut seen = std::collections::HashSet::new();
+        self.output_aliases.retain_mut(|a| {
+            a.alias = a.alias.trim().chars().take(MAX_ALIAS_CHARS).collect();
+            !a.alias.is_empty() && seen.insert(a.id.clone())
+        });
         self.window_width = self
             .window_width
             .clamp(*WIDTH_RANGE.start(), *WIDTH_RANGE.end());
@@ -679,6 +711,8 @@ mod tests {
             groups: Vec::new(),
             app_aliases: Vec::new(),
             scenes: Vec::new(),
+            hidden_outputs: Vec::new(),
+            output_aliases: Vec::new(),
             tray_style: TrayStyle::Number,
             taskbar_wheel: true,
             wheel_step: 4,
@@ -689,7 +723,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"prewarmOnHover":false,"volumeFeedback":false,"debugTools":true,"animationFps":120,"popupDirection":"fromTop","popupStyle":"slideFromEdge","popupSpeed":"slow","windowWidth":400,"masterAtBottom":true,"appsReversed":true,"showPinButton":true,"showGroupButton":false,"showSceneButton":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"prewarmOnHover":false,"volumeFeedback":false,"debugTools":true,"animationFps":120,"popupDirection":"fromTop","popupStyle":"slideFromEdge","popupSpeed":"slow","windowWidth":400,"masterAtBottom":true,"appsReversed":true,"showPinButton":true,"showGroupButton":false,"showSceneButton":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"hiddenOutputs":[],"outputAliases":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
         );
     }
 

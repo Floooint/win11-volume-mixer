@@ -1,5 +1,5 @@
-//! 系统托盘：左键显示 / 隐藏窗口，右键菜单打开、静音或退出，中键切换静音，滚轮调节系统音量
-//! （可设置为在整个任务栏上响应滚轮）。
+//! 系统托盘：左键显示 / 隐藏窗口，右键菜单打开、静音、切换输出设备或退出，中键切换静音，
+//! 滚轮调节系统音量（可设置为在整个任务栏上响应滚轮）。
 //! 图标随系统音量和静音状态变化；样式和颜色可在设置中选择，颜色默认跟随任务栏深浅色。
 
 mod glyph;
@@ -10,11 +10,11 @@ mod wheel;
 use std::sync::Mutex;
 
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager, Position, Size};
 
-use crate::audio::{AudioService, Command, MasterStatus};
+use crate::audio::{AudioService, Command, MasterStatus, OutputDevice, OutputRole};
 use crate::config::Config;
 use crate::window::{self, Rect};
 use glyph::Icon;
@@ -23,6 +23,8 @@ const TRAY_ID: &str = "main";
 const MENU_OPEN: &str = "open";
 const MENU_MUTE: &str = "mute";
 const MENU_QUIT: &str = "quit";
+/// 输出设备子菜单中各设备的菜单项标识为此前缀加设备标识。
+const MENU_OUTPUT_PREFIX: &str = "output:";
 /// 设备名很长时截断，Windows 托盘提示最多显示 127 个字符。
 const MAX_DEVICE_NAME: usize = 60;
 
@@ -41,22 +43,32 @@ struct Inner {
     mute_item: Option<CheckMenuItem<tauri::Wry>>,
     /// “静音”当前的（可用、勾选）状态，相同时不更新。
     mute_state: Option<(bool, bool)>,
+    /// 音频线程推送的输出设备列表。
+    outputs: Vec<OutputDevice>,
+    /// 右键菜单中的“输出设备”子菜单。
+    outputs_menu: Option<Submenu<tauri::Wry>>,
+    /// 子菜单当前的内容（名称、是否勾选），相同时不重建。
+    outputs_state: Option<Vec<(String, String, bool)>>,
 }
 
 pub fn create(app: &App) -> tauri::Result<()> {
     // 勾选状态在 `refresh` 中按系统静音同步；没有输出设备时不可用。
     let mute = CheckMenuItem::with_id(app, MENU_MUTE, "静音", false, false, None::<&str>)?;
+    // 设备在 `refresh` 中按音频线程推送的列表填入；没有可切换的设备时不可用。
+    let outputs = Submenu::new(app, "输出设备", false)?;
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, MENU_OPEN, "打开", true, None::<&str>)?,
             &mute,
+            &outputs,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?,
         ],
     )?;
     if let Ok(mut inner) = app.state::<TrayState>().0.lock() {
         inner.mute_item = Some(mute);
+        inner.outputs_menu = Some(outputs);
     }
 
     let handle = app.handle().clone();
@@ -77,7 +89,18 @@ pub fn create(app: &App) -> tauri::Result<()> {
                 schedule_refresh(app);
             }
             MENU_QUIT => app.exit(0),
-            _ => {}
+            id => {
+                if let Some(device_id) = id.strip_prefix(MENU_OUTPUT_PREFIX) {
+                    let device_id = device_id.to_string();
+                    app.state::<AudioService>()
+                        .post(|reply| Command::SetDefaultOutput(device_id, OutputRole::All, reply));
+                    // 菜单项会自己切换勾选；按实际状态重新同步（设备切换后列表推送过来还会再同步一次）。
+                    if let Ok(mut inner) = app.state::<TrayState>().0.lock() {
+                        inner.outputs_state = None;
+                    }
+                    schedule_refresh(app);
+                }
+            }
         })
         .on_tray_icon_event(|tray, event| {
             let app = tray.app_handle();
@@ -151,7 +174,17 @@ pub fn show_status(app: &AppHandle, status: Option<MasterStatus>) {
     schedule_refresh(app);
 }
 
-/// 设置中的托盘样式或颜色变化后调用。
+/// 记录新的输出设备列表并更新托盘菜单。可在任意线程调用（同 [`show_status`]）。
+pub fn show_outputs(app: &AppHandle, outputs: Vec<OutputDevice>) {
+    if let Some(state) = app.try_state::<TrayState>()
+        && let Ok(mut inner) = state.0.lock()
+    {
+        inner.outputs = outputs;
+    }
+    schedule_refresh(app);
+}
+
+/// 设置中的托盘样式、颜色或设备的隐藏、重命名变化后调用。
 pub fn schedule_refresh(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || refresh(&handle));
@@ -168,9 +201,20 @@ fn refresh(app: &AppHandle) {
         return;
     };
 
-    let (style, color) = app
-        .state::<Config>()
-        .read(|s| (s.tray_style, s.tray_color.clone()));
+    let (style, color, hidden, aliases) = app.state::<Config>().read(|s| {
+        (
+            s.tray_style,
+            s.tray_color.clone(),
+            s.hidden_outputs.clone(),
+            s.output_aliases.clone(),
+        )
+    });
+    let display_name = |id: &str, name: &str| {
+        aliases
+            .iter()
+            .find(|a| a.id == id)
+            .map_or_else(|| name.to_string(), |a| a.alias.clone())
+    };
     let color =
         color
             .as_deref()
@@ -196,7 +240,15 @@ fn refresh(app: &AppHandle) {
         }
     }
 
-    let tooltip = tooltip(status.as_ref());
+    let tooltip = tooltip(
+        status
+            .as_ref()
+            .map(|s| MasterStatus {
+                device_name: display_name(&s.device_id, &s.device_name),
+                ..s.clone()
+            })
+            .as_ref(),
+    );
     if inner.tooltip != tooltip {
         let _ = tray.set_tooltip(Some(&tooltip));
         inner.tooltip = tooltip;
@@ -213,6 +265,46 @@ fn refresh(app: &AppHandle) {
         let _ = item.set_checked(mute_state.1);
         inner.mute_state = Some(mute_state);
     }
+
+    // 与主界面一致：不显示设置中隐藏的设备（正在播放或通话的设备除外）。
+    let outputs_state: Vec<_> = inner
+        .outputs
+        .iter()
+        .filter(|o| o.is_default || o.is_communications || !hidden.iter().any(|h| h.id == o.id))
+        .map(|o| (o.id.clone(), display_name(&o.id, &o.name), o.is_default))
+        .collect();
+    if inner.outputs_state.as_ref() != Some(&outputs_state)
+        && let Some(menu) = &inner.outputs_menu
+    {
+        if let Err(e) = rebuild_outputs_menu(app, menu, &outputs_state) {
+            eprintln!("[tray] 更新输出设备菜单失败：{e}");
+        }
+        inner.outputs_state = Some(outputs_state);
+    }
+}
+
+/// 按（设备标识、显示名称、是否当前设备）重建“输出设备”子菜单。只有一个设备时不可用。
+fn rebuild_outputs_menu(
+    app: &AppHandle,
+    menu: &Submenu<tauri::Wry>,
+    outputs: &[(String, String, bool)],
+) -> tauri::Result<()> {
+    for item in menu.items()? {
+        menu.remove(&item)?;
+    }
+    for (id, name, current) in outputs {
+        // Win32 菜单把 `&` 当作快捷键标记，设备名中的 `&` 要写成 `&&` 才能显示出来。
+        let item = CheckMenuItem::with_id(
+            app,
+            format!("{MENU_OUTPUT_PREFIX}{id}"),
+            name.replace('&', "&&"),
+            true,
+            *current,
+            None::<&str>,
+        )?;
+        menu.append(&item)?;
+    }
+    menu.set_enabled(outputs.len() > 1)
 }
 
 fn tooltip(status: Option<&MasterStatus>) -> String {
@@ -255,6 +347,7 @@ mod tests {
 
     fn status(name: &str, volume: f32, muted: bool) -> MasterStatus {
         MasterStatus {
+            device_id: "dev".into(),
             device_name: name.into(),
             volume: VolumeState { volume, muted },
         }

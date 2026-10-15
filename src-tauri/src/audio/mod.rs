@@ -4,13 +4,14 @@
 mod aggregate;
 mod app_info;
 mod device;
+mod outputs;
 mod session;
 mod thread;
 mod types;
 
 pub use thread::AudioService;
 use tokio::sync::oneshot;
-pub use types::{AppAudio, AudioSnapshot, VolumeState};
+pub use types::{AppAudio, AudioSnapshot, OutputDevice, OutputRole, VolumeState};
 use windows::Win32::Media::Audio::AudioSessionState;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows_core::{GUID, PWSTR};
@@ -27,15 +28,21 @@ type Reply<T> = oneshot::Sender<AppResult<T>>;
 pub enum Update {
     Snapshot(AudioSnapshot),
     Master(VolumeState),
+    /// 输出设备列表变化（插拔、改名、默认通信设备变化）。默认设备变化时推送完整快照。
+    Outputs(Vec<OutputDevice>),
     AppUpsert(AppAudio),
     AppRemove(String),
     /// 系统音量的当前状态，供托盘图标使用。与 `Master` 不同，本程序自身的修改也会推送。
     /// 没有输出设备时为 `None`。
     MasterStatus(Option<MasterStatus>),
+    /// 输出设备列表，供托盘菜单使用。有变化时推送，包括启动后的第一次读取。
+    TrayOutputs(Vec<OutputDevice>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MasterStatus {
+    /// 托盘提示按它查找设备的重命名。
+    pub device_id: String,
     pub device_name: String,
     pub volume: VolumeState,
 }
@@ -55,6 +62,8 @@ pub enum Command {
     SetGroupVolume(Vec<(String, f32)>, f32, Reply<()>),
     /// 组静音：组内所有应用一起静音或取消静音。
     SetGroupMute(Vec<String>, bool, Reply<()>),
+    /// 切换默认输出设备。
+    SetDefaultOutput(String, OutputRole, Reply<()>),
     Shutdown,
 }
 
@@ -76,6 +85,8 @@ pub enum Msg {
         session_id: String,
     },
     DefaultDeviceChanged,
+    /// 设备插拔、启用或禁用，或默认通信设备变化。
+    OutputsChanged,
     /// 某个设备在系统设置中被改名。
     DeviceRenamed {
         device_id: String,

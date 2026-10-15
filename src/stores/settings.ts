@@ -4,7 +4,9 @@ import {
   type AppGroup,
   commands,
   type GroupMember,
+  type OutputAlias,
   type SavedApp,
+  type SavedOutput,
   type Scene,
   type SceneApp,
   type Settings_Serialize as Settings,
@@ -30,6 +32,10 @@ type SettingsState = {
   /** 隐藏应用；同时取消置顶。 */
   hideApp: (app: SavedApp) => Promise<void>;
   unhideApp: (appId: string) => Promise<void>;
+  /** 隐藏 / 显示输出设备（设置页“输出设备”）。 */
+  setOutputHidden: (output: SavedOutput, hidden: boolean) => Promise<void>;
+  /** 重命名输出设备；`alias` 为空或与原名相同时恢复原名。`output.name` 为原名。 */
+  renameOutput: (output: SavedOutput, alias: string | null) => Promise<void>;
   /** 新建一个空分组（展开状态），返回其标识；保存失败时为 `null`。 */
   createGroup: () => Promise<string | null>;
   /**
@@ -141,6 +147,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   unhideApp: async (appId) => {
     const s = get().settings;
     if (s) await get().save({ hiddenApps: without(s.hiddenApps, appId) });
+  },
+  setOutputHidden: async (output, hidden) => {
+    const s = get().settings;
+    if (!s) return;
+    const rest = s.hiddenOutputs.filter((o) => o.id !== output.id);
+    await get().save({ hiddenOutputs: hidden ? [...rest, output] : rest });
+  },
+  renameOutput: async (output, alias) => {
+    const s = get().settings;
+    if (!s) return;
+    const rest = s.outputAliases.filter((a) => a.id !== output.id);
+    const trimmed = alias?.trim();
+    const entry: OutputAlias | null =
+      trimmed && trimmed !== output.name ? { ...output, alias: trimmed } : null;
+    await get().save({ outputAliases: entry ? [...rest, entry] : rest });
   },
   createGroup: async () => {
     const id = `group-${Date.now().toString(36)}`;

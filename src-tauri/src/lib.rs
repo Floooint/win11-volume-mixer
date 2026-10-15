@@ -36,6 +36,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::set_app_mute,
             commands::set_group_volume,
             commands::set_group_mute,
+            commands::set_default_output,
             commands::window_ready,
             commands::report_open_timing,
             commands::fit_window_height,
@@ -61,6 +62,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             events::AudioSnapshotEvent,
             events::MasterChangedEvent,
+            events::OutputsChangedEvent,
             events::AppUpsertEvent,
             events::AppRemoveEvent,
             accent::AccentColors,
@@ -132,6 +134,7 @@ pub fn run() {
             let handle = app.handle().clone();
             app.manage(AudioService::start(move |update| match update {
                 Update::MasterStatus(status) => tray::show_status(&handle, status),
+                Update::TrayOutputs(outputs) => tray::show_outputs(&handle, outputs),
                 update => events::emit(&handle, update),
             }));
             accent::watch(app.handle());

@@ -2,7 +2,7 @@
 
 use tauri::{Manager, State};
 
-use crate::audio::{AudioService, AudioSnapshot, Command};
+use crate::audio::{AudioService, AudioSnapshot, Command, OutputRole};
 use crate::config::{Config, Settings};
 use crate::error::AppResult;
 use crate::feedback::Feedback;
@@ -53,6 +53,20 @@ pub async fn set_app_mute(
 ) -> AppResult<()> {
     audio
         .request(|reply| Command::SetAppMute(app_id, muted, reply))
+        .await
+}
+
+/// 切换默认输出设备。播放设备变化后推送 `audio://snapshot`（新设备的完整状态），
+/// 只有通话设备变化时推送 `audio://outputs`。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_default_output(
+    audio: State<'_, AudioService>,
+    device_id: String,
+    role: OutputRole,
+) -> AppResult<()> {
+    audio
+        .request(|reply| Command::SetDefaultOutput(device_id, role, reply))
         .await
 }
 

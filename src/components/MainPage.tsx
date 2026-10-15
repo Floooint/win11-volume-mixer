@@ -1,5 +1,6 @@
 import {
   BookmarkPlus,
+  ChevronDown,
   ChevronRight,
   FolderClosed,
   FolderPlus,
@@ -21,9 +22,13 @@ import {
   type AppAlias,
   type AppAudio,
   type AppGroup,
+  type AudioSnapshot,
   commands,
+  type OutputAlias,
+  type OutputDevice,
   type PinMode,
   type SavedApp,
+  type SavedOutput,
   type Scene,
   type SceneApp,
 } from "@/bindings";
@@ -35,6 +40,7 @@ import { AppAvatar } from "@/components/AppAvatar";
 import { IconButton } from "@/components/IconButton";
 import { Tooltip } from "@/components/Tooltip";
 import { MainPageSkeleton } from "@/components/Skeleton";
+import { OutputIcon, OutputPicker } from "@/components/OutputPicker";
 import { VolumeRow } from "@/components/VolumeRow";
 import { type DragState, type DropTarget, sameTarget, useAppDrag } from "@/hooks/use-app-drag";
 import { announceHeightAnimation, useFitWindowHeight } from "@/hooks/use-fit-window-height";
@@ -153,6 +159,212 @@ function AutostartPrompt() {
   );
 }
 
+/**
+ * 系统音量。点击这一块（滑块、静音按钮、音量数字除外）弹出输出设备列表，切换后收起；
+ * 列表中不显示设置里隐藏的设备（正在播放或通话的设备除外）。没有可切换的设备时不弹出。
+ *
+ * 列表是浮在卡片上方（置顶时在下方）的浮层，不改变窗口高度：展开时若让窗口跟着变高，
+ * 窗口每帧都要重排 WebView，动画会卡顿，内容区还会短暂露出空白。
+ * 点击列表外、按 Esc 或窗口失焦时收起。
+ */
+function MasterSection({
+  device,
+  outputs,
+  atBottom,
+  renaming,
+  onRenameDone,
+  onVolumeChange,
+  onMuteChange,
+}: {
+  device: NonNullable<AudioSnapshot["device"]>;
+  outputs: OutputDevice[];
+  atBottom: boolean;
+  /** 正在重命名的设备（右键设备“重命名”）。 */
+  renaming: string | null;
+  onRenameDone: (name: string | null) => void;
+  onVolumeChange: (volume: number) => void;
+  onMuteChange: (muted: boolean) => void;
+}) {
+  const setDefaultOutput = useAudioStore((s) => s.setDefaultOutput);
+  const hiddenOutputs = useSettingsStore((s) => s.settings?.hiddenOutputs ?? NO_OUTPUTS);
+  const outputAliases = useSettingsStore((s) => s.settings?.outputAliases ?? NO_OUTPUT_ALIASES);
+  const aliases = new Map(outputAliases.map((a) => [a.id, a.alias]));
+  const deviceName = aliases.get(device.id) ?? device.name;
+  const [open, setOpen] = useState(false);
+  /** 浮层最大高度：不超出窗口，放不下时在浮层内滚动。 */
+  const [maxHeight, setMaxHeight] = useState<number>();
+  const sectionRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const hidden = new Set(hiddenOutputs.map((o) => o.id));
+  const visible = outputs.filter(
+    (o) => o.id === device.id || o.isCommunications || !hidden.has(o.id),
+  );
+  const current = outputs.find((o) => o.id === device.id);
+  // 通话设备不受隐藏影响，与当前设备不同时也算可切换（可在“…”中改回）。
+  const canPick = visible.length > 1;
+  const shown = open && canPick;
+
+  // 打开期间设备被拔出、只剩一个设备时收起，否则之后插回设备时会自己弹出。
+  useEffect(() => {
+    if (!canPick) setOpen(false);
+  }, [canPick]);
+
+  // 窗口高度随应用增减变化，打开期间也要重新计算。
+  useLayoutEffect(() => {
+    if (!shown) return;
+    const update = () => {
+      const rect = sectionRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMaxHeight(Math.max(0, atBottom ? rect.top - 12 : window.innerHeight - rect.bottom - 12));
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [shown, atBottom]);
+
+  // 右键“重命名”：在列表中对应的行上输入（当前设备在列表打不开时在卡片上输入）。
+  useEffect(() => {
+    if (renaming) setOpen(true);
+  }, [renaming]);
+
+  // 重命名期间不监听：点击别处时先由输入框失焦完成重命名，之后再点才收起。
+  useEffect(() => {
+    if (!shown || renaming) return;
+    const close = () => setOpen(false);
+    const onPointerDown = (e: PointerEvent) => {
+      if (!sectionRef.current?.contains(e.target as Node)) close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      close();
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("blur", close);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("blur", close);
+    };
+  }, [shown, renaming]);
+
+  return (
+    <section
+      ref={sectionRef}
+      data-menu={menuData([
+        { label: "复制设备名", value: device.name },
+        { separator: true },
+        { label: "重命名设备", action: `rename-output:${device.id}` },
+        aliases.has(device.id) && { label: "恢复原名", action: `reset-output-name:${device.id}` },
+      ])}
+      className="relative mx-3"
+    >
+      <div
+        // 点在滑块、按钮、输入框上时不弹出。
+        onClick={(e) => {
+          if (!canPick || (e.target as Element).closest("[data-no-details], button, input")) {
+            return;
+          }
+          setOpen(!open);
+        }}
+        className={cn(
+          "rounded-xl border border-border bg-card px-3 py-3 transition-colors",
+          canPick && "cursor-pointer hover:border-primary/40",
+        )}
+      >
+        {renaming === device.id && !shown && (
+          <RenameField
+            label="设备名称"
+            initial={deviceName}
+            placeholder={device.name}
+            onDone={onRenameDone}
+            className="absolute inset-x-3 top-2 z-20"
+          />
+        )}
+        <VolumeRow
+          name="总音量"
+          detail={
+            <button
+              ref={triggerRef}
+              type="button"
+              disabled={!canPick}
+              aria-expanded={shown}
+              aria-haspopup="true"
+              aria-label={`输出设备：${deviceName}，点击切换`}
+              onClick={() => setOpen(!open)}
+              className={cn(
+                "-mx-1 flex max-w-full items-center gap-1 rounded px-1 text-xs text-muted-foreground",
+                "hover:text-foreground disabled:pointer-events-none",
+                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              )}
+            >
+              {current && <OutputIcon kind={current.kind} className="size-3.5" />}
+              <span className="truncate">{deviceName}</span>
+              {canPick && (
+                <ChevronDown
+                  size={14}
+                  className={cn(
+                    "shrink-0 transition-transform duration-150",
+                    // 浮层在上方时，展开前箭头朝上。
+                    atBottom !== shown && "rotate-180",
+                  )}
+                />
+              )}
+            </button>
+          }
+          volume={device.master}
+          onVolumeChange={onVolumeChange}
+          onMuteChange={onMuteChange}
+          onVolumeCommit={() => void commands.playVolumeFeedback()}
+        />
+      </div>
+      <AnimatePresence>
+        {shown && (
+          <motion.div
+            initial={{ opacity: 0, y: atBottom ? 6 : -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: atBottom ? 6 : -6, scale: 0.98 }}
+            transition={{ duration: 0.12, ease: [0.33, 1, 0.68, 1] }}
+            style={{ transformOrigin: atBottom ? "bottom" : "top", maxHeight }}
+            // 右键设备行时复制该设备名，不用外层的“复制设备名”（当前设备）。
+            data-menu={menuData([])}
+            className={cn(
+              "absolute inset-x-0 z-40 overflow-y-auto rounded-xl border border-border",
+              "scroll-area bg-popover p-1 text-popover-foreground shadow-lg",
+              atBottom ? "bottom-full mb-1.5" : "top-full mt-1.5",
+            )}
+          >
+            <OutputPicker
+              outputs={visible}
+              aliases={aliases}
+              renaming={renaming}
+              renameField={(output) => (
+                <RenameField
+                  label="设备名称"
+                  initial={aliases.get(output.id) ?? output.name}
+                  placeholder={output.name}
+                  onDone={onRenameDone}
+                  className="absolute inset-x-0 top-0.5 z-20"
+                />
+              )}
+              onSelect={(deviceId, role) => {
+                // 只切换通话设备时，当前设备不变，列表保持打开。
+                if (role !== "communications") {
+                  setOpen(false);
+                  triggerRef.current?.focus();
+                }
+                if (role !== "none") void setDefaultOutput(deviceId, role);
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
+  );
+}
+
 function ErrorToast() {
   const error = useAudioStore((s) => s.error);
   const clearError = useAudioStore((s) => s.clearError);
@@ -178,6 +390,8 @@ const NO_APPS: SavedApp[] = [];
 const NO_GROUPS: AppGroup[] = [];
 const NO_ALIASES: AppAlias[] = [];
 const NO_SCENES: Scene[] = [];
+const NO_OUTPUTS: SavedOutput[] = [];
+const NO_OUTPUT_ALIASES: OutputAlias[] = [];
 
 /** 列表动画的时长与曲线，与窗口高度动画（animation.rs 的 RESIZE）一致。 */
 const LIST_TRANSITION = { duration: 0.18, ease: [0.33, 1, 0.68, 1] } as const;
@@ -583,7 +797,7 @@ function DragBadge({ drag }: { drag: DragState }) {
 }
 
 /** 正在重命名的分组、应用或场景。 */
-type Renaming = { kind: "group" | "app" | "scene"; id: string };
+type Renaming = { kind: "group" | "app" | "scene" | "output"; id: string };
 
 /** 场景中正在运行的应用，音量都与场景一致时视为“当前场景”。音量按百分比取整比较。 */
 function sceneState(scene: Scene, apps: AppAudio[]): { running: number; current: boolean } {
@@ -745,21 +959,6 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const autostartPrompt = useSettingsStore((s) => s.settings?.autostartPrompt ?? false);
 
   const device = snapshot?.device;
-  const masterSection = device && (
-    <section
-      data-menu={menuData([{ label: "复制设备名", value: device.name }])}
-      className="mx-3 rounded-xl border border-border bg-card px-3 py-3"
-    >
-      <VolumeRow
-        name="总音量"
-        detail={device.name}
-        volume={device.master}
-        onVolumeChange={setMasterVolume}
-        onMuteChange={setMasterMute}
-        onVolumeCommit={() => void commands.playVolumeFeedback()}
-      />
-    </section>
-  );
   const pinnedApps = useSettingsStore((s) => s.settings?.pinnedApps ?? NO_APPS);
   const hiddenApps = useSettingsStore((s) => s.settings?.hiddenApps ?? NO_APPS);
   const groups = useSettingsStore((s) => s.settings?.groups ?? NO_GROUPS);
@@ -849,11 +1048,18 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const { drag, start: startDrag } = useAppDrag(moveTo);
 
   const [renaming, setRenaming] = useState<Renaming | null>(null);
+  const renameOutput = useSettingsStore((s) => s.renameOutput);
+  const savedOutput = (id: string) => ({
+    id,
+    name: snapshot?.outputs.find((o) => o.id === id)?.name ?? id,
+  });
   const finishRename = (name: string | null) => {
     const target = renaming;
     setRenaming(null);
     if (!target || name === null) return;
-    if (target.kind === "group") {
+    if (target.kind === "output") {
+      void renameOutput(savedOutput(target.id), name || null);
+    } else if (target.kind === "group") {
       if (name) void updateGroup(target.id, { name });
     } else if (target.kind === "scene") {
       if (name) void updateScene(target.id, { name });
@@ -862,13 +1068,25 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     }
   };
 
+  const masterSection = device && (
+    <MasterSection
+      device={device}
+      outputs={snapshot.outputs}
+      atBottom={masterAtBottom}
+      renaming={renaming?.kind === "output" ? renaming.id : null}
+      onRenameDone={finishRename}
+      onVolumeChange={setMasterVolume}
+      onMuteChange={setMasterMute}
+    />
+  );
+
   // 右键菜单中的动作。回调在菜单关闭后才执行，通过 ref 读取最新状态。
-  const latest = useRef({ moveTo, groups, savedOf, volumeOf, captureScene });
-  latest.current = { moveTo, groups, savedOf, volumeOf, captureScene };
+  const latest = useRef({ moveTo, groups, savedOf, volumeOf, captureScene, savedOutput });
+  latest.current = { moveTo, groups, savedOf, volumeOf, captureScene, savedOutput };
   useEffect(
     () =>
       onMenuAction((action) => {
-        const { moveTo, groups, savedOf, volumeOf, captureScene } = latest.current;
+        const { moveTo, groups, savedOf, volumeOf, captureScene, savedOutput } = latest.current;
         const [kind, ...rest] = action.split(":");
         const arg = rest.join(":");
         switch (kind) {
@@ -907,6 +1125,12 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           case "reset-name":
             void renameApp(savedOf(arg), null);
             break;
+          case "rename-output":
+            setRenaming({ kind: "output", id: arg });
+            break;
+          case "reset-output-name":
+            void renameOutput(savedOutput(arg), null);
+            break;
           case "scene-overwrite":
             void updateScene(arg, { apps: captureScene() });
             break;
@@ -930,6 +1154,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
       renameApp,
       updateScene,
       deleteScene,
+      renameOutput,
     ],
   );
 
