@@ -219,8 +219,6 @@ pub struct Settings {
     pub prewarm_on_hover: bool,
     /// 调节系统音量后播放提示音。
     pub volume_feedback: bool,
-    /// 在主界面显示调试工具（添加占位应用）。
-    pub debug_tools: bool,
     /// 窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。
     pub animation_fps: Option<u32>,
     /// 窗口弹出的方向，默认跟随任务栏位置。
@@ -266,6 +264,8 @@ pub struct Settings {
     pub wheel_step: u32,
     /// 托盘 / 任务栏滚轮停止后播放提示音。
     pub wheel_feedback: bool,
+    /// 有应用正在发声时，托盘 / 任务栏滚轮不播放提示音（听正在播放的声音就能感知音量）。
+    pub wheel_feedback_quiet_when_playing: bool,
     /// 托盘 / 任务栏滚轮调节时显示 Windows 自带的音量浮层。
     pub wheel_osd: bool,
     /// 托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。
@@ -281,7 +281,6 @@ impl Default for Settings {
             smart_release_seconds: DEFAULT_SMART_SECONDS,
             prewarm_on_hover: true,
             volume_feedback: true,
-            debug_tools: false,
             animation_fps: None,
             popup_direction: PopupDirection::default(),
             popup_style: PopupStyle::default(),
@@ -306,6 +305,7 @@ impl Default for Settings {
             taskbar_wheel: true,
             wheel_step: DEFAULT_WHEEL_STEP,
             wheel_feedback: true,
+            wheel_feedback_quiet_when_playing: false,
             wheel_osd: true,
             tray_color: None,
             autostart_prompt: false,
@@ -626,10 +626,10 @@ mod tests {
 
     #[test]
     fn 某一项无法解析时只让该项使用默认值() {
-        let text = r#"{"windowWidth": 400, "theme": "未来的主题", "debugTools": true}"#;
+        let text = r#"{"windowWidth": 400, "theme": "未来的主题", "wheelOsd": false}"#;
         let settings = parse_lenient(text).expect("其余项应能读取");
         assert_eq!(settings.window_width, 400);
-        assert!(settings.debug_tools);
+        assert!(!settings.wheel_osd);
         assert_eq!(settings.theme, Settings::default().theme);
     }
 
@@ -657,7 +657,6 @@ mod tests {
         assert_eq!(settings.smart_release_seconds, 300);
         assert!(settings.prewarm_on_hover, "默认悬停任务栏时预加载窗口");
         assert!(settings.volume_feedback, "默认开启提示音");
-        assert!(!settings.debug_tools, "默认关闭调试工具");
         assert_eq!(settings.animation_fps, None, "默认跟随显示器刷新率");
         assert_eq!(
             settings.popup_direction,
@@ -692,7 +691,6 @@ mod tests {
             smart_release_seconds: 60,
             prewarm_on_hover: false,
             volume_feedback: false,
-            debug_tools: true,
             animation_fps: Some(120),
             popup_direction: PopupDirection::FromTop,
             popup_style: PopupStyle::SlideFromEdge,
@@ -717,13 +715,14 @@ mod tests {
             taskbar_wheel: true,
             wheel_step: 4,
             wheel_feedback: false,
+            wheel_feedback_quiet_when_playing: true,
             wheel_osd: true,
             tray_color: Some("#FFFFFF".into()),
             autostart_prompt: false,
         };
         assert_eq!(
             serde_json::to_string(&settings).unwrap(),
-            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"prewarmOnHover":false,"volumeFeedback":false,"debugTools":true,"animationFps":120,"popupDirection":"fromTop","popupStyle":"slideFromEdge","popupSpeed":"slow","windowWidth":400,"masterAtBottom":true,"appsReversed":true,"showPinButton":true,"showGroupButton":false,"showSceneButton":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"hiddenOutputs":[],"outputAliases":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
+            r##"{"windowPolicy":"smart","smartReleaseSeconds":60,"prewarmOnHover":false,"volumeFeedback":false,"animationFps":120,"popupDirection":"fromTop","popupStyle":"slideFromEdge","popupSpeed":"slow","windowWidth":400,"masterAtBottom":true,"appsReversed":true,"showPinButton":true,"showGroupButton":false,"showSceneButton":true,"hardwareAcceleration":true,"theme":"dark","accent":"#744DA9","pinnedApps":[],"hiddenApps":[],"groups":[],"appAliases":[],"scenes":[],"hiddenOutputs":[],"outputAliases":[],"trayStyle":"number","taskbarWheel":true,"wheelStep":4,"wheelFeedback":false,"wheelFeedbackQuietWhenPlaying":true,"wheelOsd":true,"trayColor":"#FFFFFF","autostartPrompt":false}"##
         );
     }
 

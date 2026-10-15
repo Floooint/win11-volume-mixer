@@ -197,7 +197,7 @@ export function CustomSwatch({
           background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)",
         }}
         className={cn(
-          "relative flex size-6 items-center justify-center rounded-full ring-offset-2 ring-offset-card transition-shadow",
+          "relative flex size-5.5 items-center justify-center rounded-full ring-offset-2 ring-offset-card transition-shadow",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           selected || open ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
         )}

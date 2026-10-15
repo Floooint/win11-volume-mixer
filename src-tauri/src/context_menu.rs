@@ -1,6 +1,5 @@
 //! 网页右键菜单（WebView2 原生菜单）：
-//! - 去掉对本程序没有意义的“返回”“共享”“另存为”“打印”；
-//! - “检查”只在设置中开启了调试工具时显示；
+//! - 去掉对本程序没有意义的“返回”“刷新”“共享”“另存为”“打印”“检查”和“更多工具”等子菜单；
 //! - 在最前面加入前端给出的菜单项：复制（应用名、进程名、路径或点中的文字）和动作（置顶、隐藏等）。
 //!
 //! 前端的 `contextmenu` 监听先于本菜单执行，把菜单项写入 `window.__contextMenuItems`。
@@ -8,7 +7,6 @@
 //! 复制由后端写入剪贴板；动作通过 `window.__contextMenuAction(action)` 交回前端执行。
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, Runtime};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
     COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU, ICoreWebView2, ICoreWebView2_11,
@@ -22,12 +20,20 @@ use webview2_com::{
 use windows_core::{HSTRING, Interface, PWSTR};
 
 use crate::audio::take_pwstr;
-use crate::config::Config;
 
-/// 始终移除的菜单项，取值见 WebView2 文档中 `ICoreWebView2ContextMenuItem::Name` 的列表。
-const REMOVED: [&str; 4] = ["back", "share", "saveAs", "print"];
-/// 只在调试工具开启时保留。
-const DEBUG_ONLY: [&str; 1] = ["inspectElement"];
+/// 移除的菜单项，取值见 WebView2 文档中 `ICoreWebView2ContextMenuItem::Name` 的列表。
+/// 系统自带的子菜单（“更多工具”等）也一并移除，前端的子菜单在这之后才插入，不受影响。
+const REMOVED: [&str; 9] = [
+    "back",
+    "forward",
+    "reload",
+    "share",
+    "saveAs",
+    "print",
+    "inspectElement",
+    "webCapture",
+    "createQrCode",
+];
 
 /// 前端给出的一项菜单，见 src/lib/context-menu.ts。
 #[derive(Deserialize, Default)]
@@ -44,18 +50,13 @@ struct MenuEntry {
 }
 
 /// 在 WebView 创建后调用一次。
-pub fn install<R: Runtime>(
-    app: &AppHandle<R>,
-    controller: &ICoreWebView2Controller,
-    environment: &ICoreWebView2Environment,
-) {
-    if let Err(e) = try_install(app.clone(), controller, environment) {
+pub fn install(controller: &ICoreWebView2Controller, environment: &ICoreWebView2Environment) {
+    if let Err(e) = try_install(controller, environment) {
         eprintln!("[context-menu] 无法修改右键菜单：{e}");
     }
 }
 
-fn try_install<R: Runtime>(
-    app: AppHandle<R>,
+fn try_install(
     controller: &ICoreWebView2Controller,
     environment: &ICoreWebView2Environment,
 ) -> windows_core::Result<()> {
@@ -67,8 +68,7 @@ fn try_install<R: Runtime>(
             return Ok(());
         };
         let items = unsafe { args.MenuItems()? };
-        let debug = app.state::<Config>().read(|s| s.debug_tools);
-        remove_items(&items, debug)?;
+        remove_items(&items)?;
         if let (Some(sender), Some(environment)) = (sender, &environment) {
             add_frontend_items(sender, args, items, environment.clone())?;
         }
@@ -78,10 +78,7 @@ fn try_install<R: Runtime>(
     unsafe { webview.add_ContextMenuRequested(&handler, &mut token) }
 }
 
-fn remove_items(
-    items: &ICoreWebView2ContextMenuItemCollection,
-    debug: bool,
-) -> windows_core::Result<()> {
+fn remove_items(items: &ICoreWebView2ContextMenuItemCollection) -> windows_core::Result<()> {
     let mut count = 0u32;
     unsafe { items.Count(&mut count)? };
     // 倒序遍历，删除后前面的索引不变。
@@ -91,15 +88,17 @@ fn remove_items(
         unsafe { item.Name(&mut name)? };
         // SAFETY: Name 返回 CoTaskMemAlloc 分配的字符串，由调用方释放。
         let name = unsafe { take_pwstr(name) };
-        if should_remove(&name, debug) {
+        let mut kind = Default::default();
+        unsafe { item.Kind(&mut kind)? };
+        if should_remove(&name, kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU) {
             unsafe { items.RemoveValueAtIndex(index)? };
         }
     }
     trim_separators(items)
 }
 
-fn should_remove(name: &str, debug: bool) -> bool {
-    REMOVED.contains(&name) || (!debug && DEBUG_ONLY.contains(&name))
+fn should_remove(name: &str, is_submenu: bool) -> bool {
+    is_submenu || REMOVED.contains(&name)
 }
 
 /// 删除后可能在开头、结尾或中间留下多余的分隔线。
@@ -274,17 +273,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 检查只在调试模式下保留() {
-        assert!(should_remove("inspectElement", false));
-        assert!(!should_remove("inspectElement", true));
-    }
-
-    #[test]
-    fn 返回共享另存为打印始终移除() {
-        for name in ["back", "share", "saveAs", "print"] {
-            assert!(should_remove(name, true), "{name}");
+    fn 移除刷新共享检查等系统菜单项() {
+        for name in [
+            "back",
+            "reload",
+            "share",
+            "saveAs",
+            "print",
+            "inspectElement",
+        ] {
+            assert!(should_remove(name, false), "{name}");
         }
-        assert!(!should_remove("reload", false));
+        assert!(
+            should_remove("other", true),
+            "系统自带的子菜单（如“更多工具”）也移除"
+        );
+        assert!(!should_remove("copy", false));
     }
 
     #[test]

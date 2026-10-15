@@ -105,14 +105,14 @@ export function DetailsView() {
             <PathLink path={app.exePath} />
           </Field>
         )}
-        <Field label="标识" mono>
+        <Field label="应用 ID" mono>
           {app.appId}
         </Field>
         <Field label="状态">
           {[
             app.active ? "正在播放" : "未在播放",
             app.volume.muted ? "已静音" : `音量 ${percent}%`,
-            app.sessionCount > 1 ? `${app.sessionCount} 个会话` : null,
+            app.sessionCount > 1 ? `${app.sessionCount} 个声音` : null,
           ]
             .filter(Boolean)
             .join(" · ")}

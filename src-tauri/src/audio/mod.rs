@@ -64,6 +64,8 @@ pub enum Command {
     SetGroupMute(Vec<String>, bool, Reply<()>),
     /// 切换默认输出设备。
     SetDefaultOutput(String, OutputRole, Reply<()>),
+    /// 是否有应用正在发声（不含系统声音、已静音或音量为 0 的），用于决定是否播放滚轮提示音。
+    AnyAppPlaying(Reply<bool>),
     Shutdown,
 }
 

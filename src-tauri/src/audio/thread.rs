@@ -17,6 +17,7 @@ use windows::Win32::System::Com::{
 use windows_core::Interface;
 
 use super::aggregate::{self, SessionData};
+use super::app_info;
 use super::device::{Device, DeviceNotifier};
 use super::outputs;
 use super::session::{self, SessionNotifier, TrackedSession};
@@ -313,7 +314,20 @@ impl State {
             }
             // 切换成功后系统发出 `OnDefaultDeviceChanged`，由它重建并推送完整快照。
             Command::SetDefaultOutput(device_id, role, reply) => {
-                let _ = reply.send(outputs::set_default(&device_id, role).map_err(Into::into));
+                let result = outputs::set_default(&device_id, role).map_err(|e| {
+                    eprintln!("[audio] 切换输出设备失败：{e}");
+                    AppError::new(ErrorCode::ComFailure, "切换输出设备失败，请稍后重试")
+                });
+                let _ = reply.send(result);
+            }
+            // 系统声音不算：上一次的提示音本身会让它短暂处于活跃状态。
+            Command::AnyAppPlaying(reply) => {
+                let playing = self.sessions.values().any(|s| {
+                    s.is_active()
+                        && s.app.app_id != app_info::SYSTEM_APP_ID
+                        && s.volume().is_ok_and(|v| !v.muted && v.volume > 0.0)
+                });
+                let _ = reply.send(Ok(playing));
             }
             Command::Shutdown => unreachable!("在 handle 中处理"),
         }
@@ -523,7 +537,7 @@ impl State {
         if results.is_empty() {
             return Err(AppError::new(
                 ErrorCode::AppNotFound,
-                "该应用已没有音频会话",
+                "该应用已停止播放声音",
             ));
         }
         any_ok(results)

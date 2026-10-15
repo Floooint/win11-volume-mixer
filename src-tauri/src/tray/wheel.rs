@@ -10,7 +10,8 @@
 //! 用于预加载窗口（见 `window::taskbar_hover`）。每次移动只比较光标与缓存的任务栏矩形，
 //! 进入矩形时才用 `WindowFromPoint` 确认（全屏程序可能盖住任务栏）。
 //!
-//! 每格调节的幅度、提示音和是否显示系统音量浮层由设置项 `wheelStep` / `wheelFeedback` /
+//! 每格调节的幅度、提示音（有应用发声时可不播放）和是否显示系统音量浮层由设置项
+//! `wheelStep` / `wheelFeedback` / `wheelFeedbackQuietWhenPlaying` /
 //! `wheelOsd` 决定（见 `osd.rs`）。
 //!
 //! 不用 `WH_MOUSE_LL` 钩子：前台窗口是管理员权限等高完整性进程时，钩子收不到输入。
@@ -218,10 +219,14 @@ impl Listener {
         if notches == 0 {
             return;
         }
-        let (step, feedback, show_osd) = self
-            .app
-            .state::<Config>()
-            .read(|s| (s.wheel_step, s.wheel_feedback, s.wheel_osd));
+        let (step, feedback, quiet_when_playing, show_osd) = self.app.state::<Config>().read(|s| {
+            (
+                s.wheel_step,
+                s.wheel_feedback,
+                s.wheel_feedback_quiet_when_playing,
+                s.wheel_osd,
+            )
+        });
         let (direct, system) = split(notches, step, show_osd);
         if system == 0 {
             self.app
@@ -231,7 +236,7 @@ impl Listener {
             adjust_with_osd(self.app.clone(), direct, system);
         }
         if feedback {
-            schedule_feedback(self.app.clone());
+            schedule_feedback(self.app.clone(), quiet_when_playing);
         }
     }
 }
@@ -387,14 +392,26 @@ fn read_mouse(handle: HRAWINPUT) -> Option<Option<i32>> {
 }
 
 /// 滚轮停止后播放一次提示音，与窗口内滚轮调节的反馈一致。
-fn schedule_feedback(app: AppHandle) {
+/// `quiet_when_playing` 时，有应用正在发声就不播放。
+fn schedule_feedback(app: AppHandle, quiet_when_playing: bool) {
     let seq = WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     // 用异步任务等待，快速滚动时不会每格都新建一个系统线程。
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FEEDBACK_DELAY).await;
-        if WHEEL_SEQ.load(Ordering::SeqCst) == seq {
-            app.state::<Feedback>().play();
+        if WHEEL_SEQ.load(Ordering::SeqCst) != seq {
+            return;
         }
+        if quiet_when_playing {
+            let playing = app
+                .state::<AudioService>()
+                .request(Command::AnyAppPlaying)
+                .await;
+            // 查询失败时照常播放。
+            if playing.unwrap_or(false) {
+                return;
+            }
+        }
+        app.state::<Feedback>().play();
     });
 }
 

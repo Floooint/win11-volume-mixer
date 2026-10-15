@@ -6,7 +6,6 @@ import {
   FolderPlus,
   GripVertical,
   Pin,
-  Plus,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -34,7 +33,6 @@ import {
 } from "@/bindings";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Settings as SettingsIcon } from "@/components/animate-ui/icons/settings";
-import { Trash2 } from "@/components/animate-ui/icons/trash-2";
 import { VolumeOff } from "@/components/animate-ui/icons/volume-off";
 import { AppAvatar } from "@/components/AppAvatar";
 import { IconButton } from "@/components/IconButton";
@@ -49,12 +47,11 @@ import { closeAppDetails, closeAppDetailsOnPointerDown, toggleAppDetails } from 
 import { cn } from "@/lib/utils";
 import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
-import { DEBUG_APP_PREFIX, useDebugStore } from "@/stores/debug";
 
 const PIN_MODES: Record<PinMode, { next: PinMode; label: string }> = {
-  normal: { next: "pinned", label: "固定窗口：当前失焦自动隐藏，点击改为定住" },
-  pinned: { next: "pinnedOnTop", label: "固定窗口：当前已定住，点击改为定住并置顶" },
-  pinnedOnTop: { next: "normal", label: "固定窗口：当前已定住并置顶，点击恢复失焦隐藏" },
+  normal: { next: "pinned", label: "定住窗口（现在点击外面会自动隐藏）" },
+  pinned: { next: "pinnedOnTop", label: "定住并置顶（现在已定住，不会自动隐藏）" },
+  pinnedOnTop: { next: "normal", label: "取消定住（现在已定住并置顶）" },
 };
 
 /**
@@ -396,9 +393,9 @@ const NO_OUTPUT_ALIASES: OutputAlias[] = [];
 /** 列表动画的时长与曲线，与窗口高度动画（animation.rs 的 RESIZE）一致。 */
 const LIST_TRANSITION = { duration: 0.18, ease: [0.33, 1, 0.68, 1] } as const;
 
-/** 能否置顶 / 隐藏 / 分组：以 PID 标识的应用重启后标识会变，调试占位应用不写入设置。 */
+/** 能否置顶 / 隐藏 / 分组：以 PID 标识的应用重启后标识会变，不写入设置。 */
 function canRemember(appId: string) {
-  return !appId.startsWith("pid:") && !appId.startsWith(DEBUG_APP_PREFIX);
+  return !appId.startsWith("pid:");
 }
 
 /** 列表中一个应用所在的位置，决定右键菜单和拖动手柄。 */
@@ -443,8 +440,6 @@ function AppItem({
 }) {
   const setAppVolume = useAudioStore((s) => s.setAppVolume);
   const setAppMute = useAudioStore((s) => s.setAppMute);
-  const debug = useDebugStore();
-  const isDebug = app.appId.startsWith(DEBUG_APP_PREFIX);
   const remember = canRemember(app.appId);
   const inGroup = placement.kind === "group";
   const name = alias ?? app.name;
@@ -522,11 +517,7 @@ function AppItem({
       )}
       <VolumeRow
         name={name}
-        detail={
-          [app.sessionCount > 1 ? `${app.sessionCount} 个会话` : null, isDebug ? "调试占位" : null]
-            .filter(Boolean)
-            .join(" · ") || undefined
-        }
+        detail={app.sessionCount > 1 ? `${app.sessionCount} 个声音` : undefined}
         volume={app.volume}
         active={app.active}
         leading={
@@ -547,27 +538,13 @@ function AppItem({
         }
         scrollAreaRef={scrollAreaRef}
         trailing={
-          <>
-            {placement.kind === "pinned" && (
-              <Pin size={11} aria-label="已置顶" className="text-muted-foreground/70" />
-            )}
-            {isDebug && (
-              <IconButton
-                label={`移除 ${name}`}
-                onClick={() => debug.remove(app.appId)}
-                className="size-6"
-              >
-                <Trash2 size={13} />
-              </IconButton>
-            )}
-          </>
+          placement.kind === "pinned" && (
+            <Pin size={11} aria-label="已置顶" className="text-muted-foreground/70" />
+          )
         }
-        onVolumeChange={(v) => {
-          if (isDebug) debug.setVolume(app.appId, v);
-          else setAppVolume(app.appId, v);
-        }}
+        onVolumeChange={(v) => setAppVolume(app.appId, v)}
         onVolumeCommit={onVolumeCommit}
-        onMuteChange={(m) => (isDebug ? debug.setMute(app.appId, m) : setAppMute(app.appId, m))}
+        onMuteChange={(m) => setAppMute(app.appId, m)}
       />
     </motion.li>
   );
@@ -945,10 +922,6 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const setMasterMute = useAudioStore((s) => s.setMasterMute);
   const loadError = useAudioStore((s) => s.loadError);
   const retry = useAudioStore((s) => s.retry);
-  const debugApps = useDebugStore((s) => s.apps);
-  const addDebugApp = useDebugStore((s) => s.add);
-  const clearDebugApps = useDebugStore((s) => s.clear);
-  const debugTools = useSettingsStore((s) => s.settings?.debugTools ?? false);
 
   const masterAtBottom = useSettingsStore((s) => s.settings?.masterAtBottom ?? true);
   const appsReversed = useSettingsStore((s) => s.settings?.appsReversed ?? true);
@@ -983,7 +956,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   // 列表由三部分组成：置顶的应用、分组、其余应用（后端顺序：活跃在前，再按名称）。隐藏的不显示。
   const hidden = new Set(hiddenApps.map((a) => a.appId));
-  const all = [...(snapshot?.apps ?? []), ...(debugTools ? debugApps : [])].filter(
+  const all = (snapshot?.apps ?? []).filter(
     (app) => !hidden.has(app.appId),
   );
   const grouped = new Set(groups.flatMap((g) => g.apps.map((a) => a.appId)));
@@ -1009,7 +982,7 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const savedOf = (appId: string): SavedApp => ({ appId, name: findApp(appId)?.name ?? appId });
   const volumeOf = (appId: string) => findApp(appId)?.volume.volume ?? 1;
 
-  /** 列表中可记住的应用（不含以 PID 标识的和调试占位应用）的当前音量，保存为场景。 */
+  /** 列表中可记住的应用（不含以 PID 标识的）的当前音量，保存为场景。 */
   const captureScene = (): SceneApp[] =>
     all
       .filter((a) => canRemember(a.appId))
@@ -1184,18 +1157,6 @@ export function MainPage({ onOpenSettings }: { onOpenSettings: () => void }) {
       <header className="flex items-center justify-between px-4 pt-3 pb-2">
         <h1 className="min-w-0 truncate text-sm font-semibold">更优雅的音量控制器</h1>
         <div className="flex items-center gap-0.5">
-          {debugTools && (
-            <>
-              {debugApps.length > 0 && (
-                <IconButton label="清除全部调试应用" onClick={clearDebugApps}>
-                  <Trash2 size={16} />
-                </IconButton>
-              )}
-              <IconButton label="添加调试应用" onClick={addDebugApp}>
-                <Plus size={16} />
-              </IconButton>
-            </>
-          )}
           {showSceneButton && (
             <IconButton
               label="把当前音量保存为场景"

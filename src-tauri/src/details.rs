@@ -195,9 +195,8 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .build()?;
     set_no_activate(&window);
     // 与主窗口相同的右键菜单：复制文字、复制路径等。
-    let handle = app.clone();
     let _ = window.with_webview(move |webview| {
-        crate::context_menu::install(&handle, &webview.controller(), &webview.environment())
+        crate::context_menu::install(&webview.controller(), &webview.environment())
     });
     Ok(())
 }

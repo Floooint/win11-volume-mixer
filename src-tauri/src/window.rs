@@ -481,9 +481,8 @@ fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
     disable_system_transitions(&window);
     // 窗口被释放后重建时，恢复当前的固定方式（配置中默认置顶）。
     let _ = window.set_always_on_top(pin_mode(app).always_on_top());
-    let handle = app.clone();
     let _ = window.with_webview(move |webview| {
-        crate::context_menu::install(&handle, &webview.controller(), &webview.environment())
+        crate::context_menu::install(&webview.controller(), &webview.environment())
     });
     Ok(window)
 }

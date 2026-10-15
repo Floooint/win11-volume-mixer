@@ -20,7 +20,7 @@ type VolumeRowProps = {
   active?: boolean;
   /** 左侧的应用图标或占位字母。 */
   leading?: ReactNode;
-  /** 名称右侧的额外按钮，如调试用的删除按钮。 */
+  /** 名称右侧的额外内容，如置顶标记。 */
   trailing?: ReactNode;
   /** 所在的滚动列表，见 `VolumeSlider` 的同名参数。 */
   scrollAreaRef?: RefObject<HTMLElement | null>;

@@ -19,6 +19,9 @@ use windows_core::{HSTRING, PCWSTR, PWSTR};
 
 use super::take_pwstr;
 
+/// 系统声音的 AppId。
+pub const SYSTEM_APP_ID: &str = "system";
+
 #[derive(Debug, Clone)]
 pub struct AppInfo {
     pub app_id: String,
@@ -34,7 +37,7 @@ pub struct AppInfo {
 pub fn resolve(control: &IAudioSessionControl2) -> AppInfo {
     if unsafe { control.IsSystemSoundsSession() } == S_OK {
         return AppInfo {
-            app_id: "system".into(),
+            app_id: SYSTEM_APP_ID.into(),
             name: "系统声音".into(),
             icon: system_sounds_icon(),
             process_name: None,

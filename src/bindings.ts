@@ -309,8 +309,6 @@ export type Settings_Deserialize = {
 	prewarmOnHover?: boolean,
 	/**  调节系统音量后播放提示音。 */
 	volumeFeedback?: boolean,
-	/**  在主界面显示调试工具（添加占位应用）。 */
-	debugTools?: boolean,
 	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。 */
 	animationFps?: number | null,
 	/**  窗口弹出的方向，默认跟随任务栏位置。 */
@@ -358,6 +356,8 @@ export type Settings_Deserialize = {
 	wheelStep?: number,
 	/**  托盘 / 任务栏滚轮停止后播放提示音。 */
 	wheelFeedback?: boolean,
+	/**  有应用正在发声时，托盘 / 任务栏滚轮不播放提示音（听正在播放的声音就能感知音量）。 */
+	wheelFeedbackQuietWhenPlaying?: boolean,
 	/**  托盘 / 任务栏滚轮调节时显示 Windows 自带的音量浮层。 */
 	wheelOsd?: boolean,
 	/**  托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。 */
@@ -377,8 +377,6 @@ export type Settings_Serialize = {
 	prewarmOnHover: boolean,
 	/**  调节系统音量后播放提示音。 */
 	volumeFeedback: boolean,
-	/**  在主界面显示调试工具（添加占位应用）。 */
-	debugTools: boolean,
 	/**  窗口滑入 / 滑出动画的帧率（帧 / 秒）。`None` 表示跟随显示器刷新率。 */
 	animationFps: number | null,
 	/**  窗口弹出的方向，默认跟随任务栏位置。 */
@@ -426,6 +424,8 @@ export type Settings_Serialize = {
 	wheelStep: number,
 	/**  托盘 / 任务栏滚轮停止后播放提示音。 */
 	wheelFeedback: boolean,
+	/**  有应用正在发声时，托盘 / 任务栏滚轮不播放提示音（听正在播放的声音就能感知音量）。 */
+	wheelFeedbackQuietWhenPlaying: boolean,
 	/**  托盘 / 任务栏滚轮调节时显示 Windows 自带的音量浮层。 */
 	wheelOsd: boolean,
 	/**  托盘图标颜色 `#RRGGBB`；`None` 表示跟随任务栏深浅色（深色任务栏为白色，浅色为黑色）。 */

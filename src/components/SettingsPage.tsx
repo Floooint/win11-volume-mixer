@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { BookmarkPlus, ChevronDown, FolderPlus, Pin } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   commands,
@@ -35,15 +35,15 @@ import { useAudioStore } from "@/stores/audio";
 import { useSettingsStore } from "@/stores/settings";
 
 const MODES: (SelectOption<WindowPolicy> & { hint: string })[] = [
-  { value: "smart", label: "智能", hint: "隐藏一段时间后释放界面，兼顾速度与内存" },
-  { value: "resident", label: "常驻", hint: "界面始终保留，打开最快，后台内存较高" },
-  { value: "silent", label: "静默", hint: "隐藏即释放界面，内存最低，打开约慢 0.5 秒" },
+  { value: "smart", label: "智能", hint: "收起一段时间后关闭界面，兼顾打开速度和内存" },
+  { value: "resident", label: "常驻", hint: "界面一直保留，打开最快，后台内存较高" },
+  { value: "silent", label: "静默", hint: "收起就关闭界面，内存最低，打开慢约 0.5 秒" },
 ];
 
 /** 运行模式的说明：总述加每种模式一行。 */
 const MODES_HELP = (
   <>
-    <p>窗口隐藏后如何处理界面：</p>
+    <p>窗口收起后如何处理界面：</p>
     {MODES.map((mode) => (
       <p key={mode.value}>
         <span className="font-medium">{mode.label}</span>：{mode.hint}
@@ -81,7 +81,7 @@ function AccentPicker({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-2">
+      <div role="radiogroup" aria-label="强调色" className="mt-1.5 flex flex-wrap gap-1.5">
         {swatches.map((swatch) => {
           const selected = value === swatch.value;
           return (
@@ -97,7 +97,7 @@ function AccentPicker({
                 }}
                 style={{ backgroundColor: swatch.color }}
                 className={cn(
-                  "relative size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow",
+                  "relative size-5.5 rounded-full ring-offset-2 ring-offset-card transition-shadow",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
                 )}
@@ -213,7 +213,7 @@ function TrayColorPicker({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <div role="radiogroup" aria-label="托盘图标颜色" className="mt-1.5 flex flex-wrap gap-2">
+      <div role="radiogroup" aria-label="托盘图标颜色" className="mt-1.5 flex flex-wrap gap-1.5">
         {TRAY_COLORS.map((swatch) => {
           const selected = value === swatch.value;
           return (
@@ -232,7 +232,7 @@ function TrayColorPicker({
                     swatch.value ?? "linear-gradient(135deg, #FFFFFF 0 50%, #1C1C1C 50% 100%)",
                 }}
                 className={cn(
-                  "relative size-6 rounded-full border border-border ring-offset-2 ring-offset-card transition-shadow",
+                  "relative size-5.5 rounded-full border border-border ring-offset-2 ring-offset-card transition-shadow",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   selected ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/25",
                 )}
@@ -391,51 +391,125 @@ function SavedAppList({
   );
 }
 
-/** 一组设置。`collapsible` 时点击标题展开 / 折叠，默认折叠。 */
-function Section({
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h2 className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">{title}</h2>
+      <div className="mr-1 ml-3 flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 可折叠的一组设置（默认折叠），样式与“关于”一致：卡片中一整行可点击，右侧显示摘要。
+ */
+function CollapsibleSection({
   title,
-  collapsible = false,
+  label,
+  summary,
   children,
 }: {
   title: string;
-  collapsible?: boolean;
+  /** 卡片中标题行的文字。 */
+  label: string;
+  /** 标题行右侧的摘要，如“置顶 1 · 隐藏 5”。 */
+  summary: string;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const card = (
-    <div className="mr-1 ml-3 flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
-      {children}
-    </div>
-  );
-  if (!collapsible) {
-    return (
-      <section>
-        <h2 className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">{title}</h2>
-        {card}
-      </section>
-    );
-  }
   return (
     <section>
-      <h2 className="px-3 pt-3 pb-1">
+      <h2 className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">{title}</h2>
+      <div className="mr-1 ml-3 rounded-xl border border-border bg-card">
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
           className={cn(
-            "flex items-center gap-0.5 rounded px-1 text-xs font-medium text-muted-foreground",
-            "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "flex min-h-14 w-full items-center justify-between gap-3 rounded-xl p-3 text-left",
+            "transition-colors hover:bg-accent/40",
+            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           )}
         >
-          {title}
-          <ChevronRight
-            size={14}
-            className={cn("transition-transform duration-150", open && "rotate-90")}
-          />
+          <span className="shrink-0 font-medium">{label}</span>
+          <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+            <span className="truncate">{summary}</span>
+            <ChevronDown
+              size={16}
+              className={cn("shrink-0 transition-transform duration-200", open && "rotate-180")}
+            />
+          </span>
         </button>
-      </h2>
-      <Expand open={open}>{card}</Expand>
+        <Expand open={open}>
+          <div className="flex flex-col gap-2 border-t border-border p-3">{children}</div>
+        </Expand>
+      </div>
     </section>
+  );
+}
+
+/** 标题栏按钮：点亮的显示在主界面标题栏中。 */
+function TitleBarButtons({
+  pin,
+  group,
+  scene,
+  onChange,
+}: {
+  pin: boolean;
+  group: boolean;
+  scene: boolean;
+  onChange: (patch: { showPinButton?: boolean; showGroupButton?: boolean; showSceneButton?: boolean }) => void;
+}) {
+  const buttons = [
+    {
+      label: "保存场景",
+      hint: "把当前各应用音量保存为场景。隐藏后不能新建场景，已有的场景照常使用",
+      icon: <BookmarkPlus size={16} />,
+      on: scene,
+      toggle: () => onChange({ showSceneButton: !scene }),
+    },
+    {
+      label: "新建分组",
+      hint: "隐藏后仍可在应用的右键菜单中选择“添加到分组 → 新建分组”",
+      icon: <FolderPlus size={16} />,
+      on: group,
+      toggle: () => onChange({ showGroupButton: !group }),
+    },
+    {
+      label: "定住窗口",
+      hint: "定住后点击外面不会自动隐藏。隐藏此按钮时窗口恢复为自动隐藏",
+      icon: <Pin size={16} />,
+      on: pin,
+      toggle: () => onChange({ showPinButton: !pin }),
+    },
+  ];
+  return (
+    <span className="flex items-center gap-1">
+      {buttons.map((b) => (
+        <Tooltip
+          key={b.label}
+          content={`${b.on ? "隐藏" : "显示"}“${b.label}”按钮\n${b.hint}`}
+        >
+          <button
+            type="button"
+            aria-pressed={b.on}
+            aria-label={`显示“${b.label}”按钮`}
+            onClick={b.toggle}
+            className={cn(
+              "inline-flex size-8 items-center justify-center rounded-md border transition-colors",
+              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              b.on
+                ? "border-primary/50 bg-primary/12 text-primary hover:bg-primary/18"
+                : "border-border text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground",
+            )}
+          >
+            {b.icon}
+          </button>
+        </Tooltip>
+      ))}
+    </span>
   );
 }
 
@@ -562,14 +636,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </SettingRow>
                 {settings.windowPolicy === "smart" && (
                   <SettingRow
-                    title="释放等待时间"
-                    help={`窗口隐藏多久后释放界面，${MIN_SECONDS}–${MAX_SECONDS} 秒`}
+                    title="多久后关闭界面"
+                    help={`窗口收起多久后关闭界面以节省内存，${MIN_SECONDS}–${MAX_SECONDS} 秒`}
                     isDefault={isDefault("smartReleaseSeconds")}
                     onReset={() => reset("smartReleaseSeconds")}
                   >
                     <span className="flex items-center gap-1.5">
                       <NumberInput
-                        label="释放等待时间（秒）"
+                        label="多久后关闭界面（秒）"
                         value={settings.smartReleaseSeconds}
                         min={MIN_SECONDS}
                         max={MAX_SECONDS}
@@ -585,7 +659,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 {settings.windowPolicy !== "resident" && (
                   <SettingRow
                     title="悬停任务栏时预加载"
-                    help="鼠标移到任务栏上时在后台准备好窗口，点击托盘图标即可立即打开；移出任务栏 5 秒后仍未打开则释放。准备期间短暂占用约 180 MB 内存"
+                    help="鼠标移到任务栏时提前准备窗口，点托盘图标立即打开（准备期间多占约 180 MB 内存）"
                     isDefault={isDefault("prewarmOnHover")}
                     onReset={() => reset("prewarmOnHover")}
                   >
@@ -601,7 +675,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
               <Section title="外观">
                 <SettingRow
                   title="主题"
-                  help="界面的深浅色，跟随系统时与 Windows 的“应用模式”一致"
+                  help="界面的深浅色。跟随系统时与 Windows 的“应用模式”一致"
                   isDefault={isDefault("theme")}
                   onReset={() => reset("theme")}
                 >
@@ -614,7 +688,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </SettingRow>
                 <SettingRow
                   title="强调色"
-                  help="滑块、开关等的颜色。第一个（A）跟随 Windows 强调色；最后一个为自定义颜色，按所选颜色原样显示"
+                  help="滑块、开关等的颜色。A 跟随 Windows 强调色，彩色圆环可自定义"
                   isDefault={isDefault("accent")}
                   onReset={() => reset("accent")}
                   below={
@@ -630,14 +704,17 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   defaultValue={defaults?.windowWidth}
                   onCommit={(windowWidth) => save({ windowWidth })}
                 />
+              </Section>
+
+              <Section title="主界面">
                 <SettingRow
-                  title="系统音量置底"
-                  help="系统音量放在应用列表下方，更靠近任务栏"
+                  title="总音量置底"
+                  help="总音量放在应用列表下方，更靠近任务栏"
                   isDefault={isDefault("masterAtBottom")}
                   onReset={() => reset("masterAtBottom")}
                 >
                   <Switch
-                    label="系统音量置底"
+                    label="总音量置底"
                     checked={settings.masterAtBottom}
                     onChange={(masterAtBottom) => save({ masterAtBottom })}
                   />
@@ -655,53 +732,53 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                   />
                 </SettingRow>
                 <SettingRow
-                  title="显示固定窗口按钮"
-                  help="标题栏的图钉按钮：定住窗口，失焦时不自动隐藏。隐藏按钮时窗口恢复为失焦自动隐藏"
-                  isDefault={isDefault("showPinButton")}
-                  onReset={() => reset("showPinButton")}
+                  title="标题栏按钮"
+                  help="点亮的按钮显示在主界面标题栏中，悬停查看说明"
+                  isDefault={
+                    isDefault("showSceneButton") &&
+                    isDefault("showGroupButton") &&
+                    isDefault("showPinButton")
+                  }
+                  onReset={() =>
+                    defaults &&
+                    save({
+                      showSceneButton: defaults.showSceneButton,
+                      showGroupButton: defaults.showGroupButton,
+                      showPinButton: defaults.showPinButton,
+                    })
+                  }
                 >
-                  <Switch
-                    label="显示固定窗口按钮"
-                    checked={settings.showPinButton}
-                    onChange={(showPinButton) => {
-                      // 隐藏后无法再取消固定，先恢复为失焦自动隐藏。
-                      if (!showPinButton) void commands.setPinMode("normal");
-                      void save({ showPinButton });
+                  <TitleBarButtons
+                    scene={settings.showSceneButton}
+                    group={settings.showGroupButton}
+                    pin={settings.showPinButton}
+                    onChange={(patch) => {
+                      // 隐藏后无法再取消定住，先恢复为自动隐藏。
+                      if (patch.showPinButton === false) void commands.setPinMode("normal");
+                      void save(patch);
                     }}
                   />
                 </SettingRow>
+              </Section>
+
+              <Section title="托盘图标">
                 <SettingRow
-                  title="显示新建分组按钮"
-                  help="标题栏的新建分组按钮。隐藏后仍可在应用的右键菜单中选择“添加到分组 → 新建分组”"
-                  isDefault={isDefault("showGroupButton")}
-                  onReset={() => reset("showGroupButton")}
+                  title="样式"
+                  isDefault={isDefault("trayStyle")}
+                  onReset={() => reset("trayStyle")}
                 >
-                  <Switch
-                    label="显示新建分组按钮"
-                    checked={settings.showGroupButton}
-                    onChange={(showGroupButton) => save({ showGroupButton })}
+                  <Select
+                    label="托盘图标样式"
+                    value={settings.trayStyle}
+                    options={TRAY_STYLES}
+                    onChange={(trayStyle) => save({ trayStyle })}
                   />
                 </SettingRow>
                 <SettingRow
-                  title="显示保存场景按钮"
-                  help="标题栏的书签按钮：把当前各应用音量保存为场景。隐藏后不能新建场景，已有的场景照常显示和使用"
-                  isDefault={isDefault("showSceneButton")}
-                  onReset={() => reset("showSceneButton")}
-                >
-                  <Switch
-                    label="显示保存场景按钮"
-                    checked={settings.showSceneButton}
-                    onChange={(showSceneButton) => save({ showSceneButton })}
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="托盘图标"
-                  help="任务栏通知区域中的图标样式和颜色。颜色的第一项跟随任务栏深浅色：深色任务栏为白色，浅色为黑色"
-                  isDefault={isDefault("trayStyle") && isDefault("trayColor")}
-                  onReset={() =>
-                    defaults &&
-                    save({ trayStyle: defaults.trayStyle, trayColor: defaults.trayColor })
-                  }
+                  title="颜色"
+                  help="半黑半白的一项跟随任务栏：深色任务栏为白色，浅色为黑色"
+                  isDefault={isDefault("trayColor")}
+                  onReset={() => reset("trayColor")}
                   below={
                     <>
                       <TrayColorPicker
@@ -715,20 +792,226 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       </div>
                     </>
                   }
+                />
+              </Section>
+
+              <CollapsibleSection
+                title="应用管理"
+                label="置顶、隐藏与重命名"
+                summary={
+                  [
+                    settings.pinnedApps.length > 0 && `置顶 ${settings.pinnedApps.length}`,
+                    settings.hiddenApps.length > 0 && `隐藏 ${settings.hiddenApps.length}`,
+                    settings.appAliases.length > 0 && `重命名 ${settings.appAliases.length}`,
+                    settings.scenes.length > 0 && `场景 ${settings.scenes.length}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "暂无"
+                }
+              >
+                {settings.pinnedApps.length +
+                  settings.hiddenApps.length +
+                  settings.appAliases.length +
+                  settings.scenes.length ===
+                  0 && (
+                  <p className="text-xs text-muted-foreground">
+                    在主界面右键应用可以置顶、隐藏、重命名；点击标题栏的书签按钮可保存音量场景。
+                  </p>
+                )}
+                {settings.pinnedApps.length > 0 && (
+                  <SettingRow
+                    title="置顶的应用"
+                    help="在主界面右键应用选择“置顶”。置顶的应用排在最前，可拖动左侧手柄调整顺序"
+                    below={
+                      <SavedAppList
+                        apps={withAliases(settings.pinnedApps)}
+                        actionLabel="取消置顶"
+                        onAction={(appId) => void unpinApp(appId)}
+                      />
+                    }
+                  />
+                )}
+                {settings.hiddenApps.length > 0 && (
+                  <SettingRow
+                    title="隐藏的应用"
+                    help="在主界面右键应用选择“隐藏”。隐藏的应用不在列表中显示，音量不受影响"
+                    below={
+                      <SavedAppList
+                        apps={withAliases(settings.hiddenApps)}
+                        actionLabel="取消隐藏"
+                        onAction={(appId) => void unhideApp(appId)}
+                      />
+                    }
+                  />
+                )}
+                {settings.appAliases.length > 0 && (
+                  <SettingRow
+                    title="重命名的应用"
+                    help="在主界面右键应用选择“重命名”。只改变本程序中显示的名称"
+                    below={
+                      <SavedAppList
+                        apps={settings.appAliases.map((a) => ({
+                          appId: a.appId,
+                          name: `${a.alias}（${a.name}）`,
+                        }))}
+                        actionLabel="恢复原名"
+                        onAction={(appId) => {
+                          const app = settings.appAliases.find((a) => a.appId === appId);
+                          if (app) void renameApp(app, null);
+                        }}
+                      />
+                    }
+                  />
+                )}
+                {settings.scenes.length > 0 && (
+                  <SettingRow
+                    title="音量场景"
+                    help="点击主界面标题栏的书签按钮，把当前各应用的音量保存为场景，点击场景即可切换。右键场景可覆盖、重命名"
+                    below={
+                      <SavedAppList
+                        apps={settings.scenes.map((scene) => ({
+                          appId: scene.id,
+                          name: `${scene.name}（${scene.apps.length} 个应用）`,
+                        }))}
+                        actionLabel="删除"
+                        onAction={(sceneId) => void deleteScene(sceneId)}
+                      />
+                    }
+                  />
+                )}
+              </CollapsibleSection>
+
+              <CollapsibleSection
+                title="输出设备"
+                label="隐藏与重命名"
+                summary={[
+                  `${outputs?.length ?? 0} 个设备`,
+                  settings.hiddenOutputs.length > 0 && `隐藏 ${settings.hiddenOutputs.length}`,
+                  settings.outputAliases.length > 0 && `重命名 ${settings.outputAliases.length}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              >
+                <SettingRow
+                  title="切换列表中显示的设备"
+                  help="点击主界面的总音量可切换输出设备。隐藏的设备不在切换列表和托盘菜单中显示，不影响系统设置"
+                  below={
+                    <OutputList
+                      outputs={outputs ?? []}
+                      hidden={settings.hiddenOutputs}
+                      aliases={settings.outputAliases}
+                      onChange={(output, hidden) => void setOutputHidden(output, hidden)}
+                    />
+                  }
+                />
+                {settings.outputAliases.length > 0 && (
+                  <SettingRow
+                    title="重命名的设备"
+                    help="在主界面右键总音量或切换列表中的设备，选择“重命名”。只改变本程序中显示的名称"
+                    below={
+                      <SavedAppList
+                        apps={settings.outputAliases.map((a) => ({
+                          appId: a.id,
+                          name: `${a.alias}（${a.name}）`,
+                        }))}
+                        actionLabel="恢复原名"
+                        onAction={(id) => {
+                          const output = settings.outputAliases.find((a) => a.id === id);
+                          if (output) void renameOutput(output, null);
+                        }}
+                      />
+                    }
+                  />
+                )}
+              </CollapsibleSection>
+
+              <Section title="滚轮">
+                <SettingRow
+                  title="任务栏滚轮"
+                  help="在任务栏任意位置滚动滚轮调节总音量。关闭时只在托盘图标上响应"
+                  isDefault={isDefault("taskbarWheel")}
+                  onReset={() => reset("taskbarWheel")}
                 >
-                  <Select
-                    label="托盘图标样式"
-                    value={settings.trayStyle}
-                    options={TRAY_STYLES}
-                    onChange={(trayStyle) => save({ trayStyle })}
+                  <Switch
+                    label="任务栏滚轮"
+                    checked={settings.taskbarWheel}
+                    onChange={(taskbarWheel) => save({ taskbarWheel })}
                   />
                 </SettingRow>
+                <SettingRow
+                  title="每格音量"
+                  help="在托盘图标或任务栏上滚动一格调节的音量"
+                  isDefault={isDefault("wheelStep")}
+                  onReset={() => reset("wheelStep")}
+                >
+                  <Select
+                    label="每格音量"
+                    value={String(settings.wheelStep) as WheelStep}
+                    options={WHEEL_STEPS}
+                    onChange={(step) => save({ wheelStep: Number(step) })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="显示 Windows 音量浮层"
+                  help="滚动时显示与按键盘音量键相同的浮层。与音量键一样，向上滚动会取消静音"
+                  isDefault={isDefault("wheelOsd")}
+                  onReset={() => reset("wheelOsd")}
+                >
+                  <Switch
+                    label="显示 Windows 音量浮层"
+                    checked={settings.wheelOsd}
+                    onChange={(wheelOsd) => save({ wheelOsd })}
+                  />
+                </SettingRow>
+              </Section>
+
+              <Section title="提示音">
+                <SettingRow
+                  title="拖动音量后"
+                  help="在窗口中调节总音量后播放提示音，响度即当前音量"
+                  isDefault={isDefault("volumeFeedback")}
+                  onReset={() => reset("volumeFeedback")}
+                >
+                  <Switch
+                    label="拖动音量后播放提示音"
+                    checked={settings.volumeFeedback}
+                    onChange={(volumeFeedback) => save({ volumeFeedback })}
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="滚轮调节后"
+                  help="在托盘图标或任务栏上滚动停止后播放提示音，响度即当前音量"
+                  isDefault={isDefault("wheelFeedback")}
+                  onReset={() => reset("wheelFeedback")}
+                >
+                  <Switch
+                    label="滚轮调节后播放提示音"
+                    checked={settings.wheelFeedback}
+                    onChange={(wheelFeedback) => save({ wheelFeedback })}
+                  />
+                </SettingRow>
+                {settings.wheelFeedback && (
+                  <SettingRow
+                    title="有应用发声时不播放"
+                    help="有应用正在播放声音（如音乐、视频）时，滚轮调节后不播放提示音，听正在播放的声音就能感知音量"
+                    isDefault={isDefault("wheelFeedbackQuietWhenPlaying")}
+                    onReset={() => reset("wheelFeedbackQuietWhenPlaying")}
+                  >
+                    <Switch
+                      label="有应用发声时滚轮不播放提示音"
+                      checked={settings.wheelFeedbackQuietWhenPlaying}
+                      onChange={(wheelFeedbackQuietWhenPlaying) =>
+                        save({ wheelFeedbackQuietWhenPlaying })
+                      }
+                    />
+                  </SettingRow>
+                )}
               </Section>
 
               <Section title="动画">
                 <SettingRow
                   title="弹出方向"
-                  help="窗口从哪一侧滑入，关闭时向同一侧滑出。自动：跟随任务栏位置，任务栏在底部时从下往上，在顶部时从上往下，在左右两侧时横向滑入"
+                  help="窗口从哪一侧滑入，收起时向同一侧滑出。自动：跟随任务栏位置"
                   isDefault={isDefault("popupDirection")}
                   onReset={() => reset("popupDirection")}
                 >
@@ -769,15 +1052,14 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 )}
                 <SettingRow
                   title="动画帧率"
-                  help={
-                    settings.animationFps === null
-                      ? `当前跟随显示器刷新率${refreshRate ? `（${refreshRate} Hz）` : ""}；可填 ${MIN_FPS}–${MAX_FPS} 帧`
-                      : `${MIN_FPS}–${MAX_FPS} 帧，清空则跟随显示器刷新率`
-                  }
+                  help={`${MIN_FPS}–${MAX_FPS} 帧。清空则跟随屏幕刷新率${refreshRate ? `（当前 ${refreshRate} Hz）` : ""}`}
                   isDefault={isDefault("animationFps")}
                   onReset={() => reset("animationFps")}
                 >
                   <span className="flex items-center gap-1.5">
+                    {settings.animationFps === null && (
+                      <span className="text-xs text-muted-foreground">跟随屏幕</span>
+                    )}
                     <NumberInput
                       label="动画帧率（帧 / 秒）"
                       value={settings.animationFps}
@@ -793,182 +1075,10 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                 </SettingRow>
               </Section>
 
-              {/* 只显示有内容的一项；都没有时整张卡片不显示（置顶和隐藏在主界面右键菜单中操作）。 */}
-              {(settings.pinnedApps.length > 0 ||
-                settings.hiddenApps.length > 0 ||
-                settings.appAliases.length > 0 ||
-                settings.scenes.length > 0) && (
-                <Section title="应用" collapsible>
-                  {settings.pinnedApps.length > 0 && (
-                    <SettingRow
-                      title="置顶的应用"
-                      help="在主界面右键应用选择“置顶”。置顶的应用排在最前，可拖动左侧手柄调整顺序"
-                      below={
-                        <SavedAppList
-                          apps={withAliases(settings.pinnedApps)}
-                          actionLabel="取消置顶"
-                          onAction={(appId) => void unpinApp(appId)}
-                        />
-                      }
-                    />
-                  )}
-                  {settings.hiddenApps.length > 0 && (
-                    <SettingRow
-                      title="隐藏的应用"
-                      help="在主界面右键应用选择“隐藏”。隐藏的应用不在列表中显示，音量不受影响"
-                      below={
-                        <SavedAppList
-                          apps={withAliases(settings.hiddenApps)}
-                          actionLabel="取消隐藏"
-                          onAction={(appId) => void unhideApp(appId)}
-                        />
-                      }
-                    />
-                  )}
-                  {settings.appAliases.length > 0 && (
-                    <SettingRow
-                      title="重命名的应用"
-                      help="在主界面右键应用选择“重命名”。只改变本程序中显示的名称"
-                      below={
-                        <SavedAppList
-                          apps={settings.appAliases.map((a) => ({
-                            appId: a.appId,
-                            name: `${a.alias}（${a.name}）`,
-                          }))}
-                          actionLabel="恢复原名"
-                          onAction={(appId) => {
-                            const app = settings.appAliases.find((a) => a.appId === appId);
-                            if (app) void renameApp(app, null);
-                          }}
-                        />
-                      }
-                    />
-                  )}
-                  {settings.scenes.length > 0 && (
-                    <SettingRow
-                      title="音量场景"
-                      help="在主界面点击标题栏的书签按钮，把当前各应用的音量保存为场景；点击场景即可切换。右键场景可覆盖、重命名"
-                      below={
-                        <SavedAppList
-                          apps={settings.scenes.map((scene) => ({
-                            appId: scene.id,
-                            name: `${scene.name}（${scene.apps.length} 个应用）`,
-                          }))}
-                          actionLabel="删除"
-                          onAction={(sceneId) => void deleteScene(sceneId)}
-                        />
-                      }
-                    />
-                  )}
-                </Section>
-              )}
-
-              {((outputs?.length ?? 0) > 0 ||
-                settings.hiddenOutputs.length > 0 ||
-                settings.outputAliases.length > 0) && (
-                <Section title="输出设备" collapsible>
-                  <SettingRow
-                    title="在列表中显示"
-                    help="点击主界面系统音量下方的设备名，可切换输出设备。隐藏的设备不在其中显示，不影响系统设置"
-                    below={
-                      <OutputList
-                        outputs={outputs ?? []}
-                        hidden={settings.hiddenOutputs}
-                        aliases={settings.outputAliases}
-                        onChange={(output, hidden) => void setOutputHidden(output, hidden)}
-                      />
-                    }
-                  />
-                  {settings.outputAliases.length > 0 && (
-                    <SettingRow
-                      title="重命名的设备"
-                      help="在主界面右键系统音量或输出设备列表中的设备，选择“重命名”。只改变本程序中显示的名称"
-                      below={
-                        <SavedAppList
-                          apps={settings.outputAliases.map((a) => ({
-                            appId: a.id,
-                            name: `${a.alias}（${a.name}）`,
-                          }))}
-                          actionLabel="恢复原名"
-                          onAction={(id) => {
-                            const output = settings.outputAliases.find((a) => a.id === id);
-                            if (output) void renameOutput(output, null);
-                          }}
-                        />
-                      }
-                    />
-                  )}
-                </Section>
-              )}
-
-              <Section title="滚轮">
-                <SettingRow
-                  title="任务栏滚轮"
-                  help="在任务栏任意位置滚动滚轮调节系统音量。关闭时只在托盘图标上响应滚轮"
-                  isDefault={isDefault("taskbarWheel")}
-                  onReset={() => reset("taskbarWheel")}
-                >
-                  <Switch
-                    label="任务栏滚轮"
-                    checked={settings.taskbarWheel}
-                    onChange={(taskbarWheel) => save({ taskbarWheel })}
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="每格音量"
-                  help="在托盘图标或任务栏上滚动一格调节的音量"
-                  isDefault={isDefault("wheelStep")}
-                  onReset={() => reset("wheelStep")}
-                >
-                  <Select
-                    label="每格音量"
-                    value={String(settings.wheelStep) as WheelStep}
-                    options={WHEEL_STEPS}
-                    onChange={(step) => save({ wheelStep: Number(step) })}
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="滚轮提示音"
-                  help="在托盘图标或任务栏上滚动停止后播放提示音，声音大小即当前音量"
-                  isDefault={isDefault("wheelFeedback")}
-                  onReset={() => reset("wheelFeedback")}
-                >
-                  <Switch
-                    label="滚轮提示音"
-                    checked={settings.wheelFeedback}
-                    onChange={(wheelFeedback) => save({ wheelFeedback })}
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="显示系统音量浮层"
-                  help="滚动时显示 Windows 自带的音量浮层（与按键盘音量键时相同）。与音量键一样，向上滚动会取消静音"
-                  isDefault={isDefault("wheelOsd")}
-                  onReset={() => reset("wheelOsd")}
-                >
-                  <Switch
-                    label="显示系统音量浮层"
-                    checked={settings.wheelOsd}
-                    onChange={(wheelOsd) => save({ wheelOsd })}
-                  />
-                </SettingRow>
-              </Section>
-
-              <Section title="其他">
-                <SettingRow
-                  title="音量提示音"
-                  help="在窗口中调节系统音量后播放提示音，声音大小即当前音量"
-                  isDefault={isDefault("volumeFeedback")}
-                  onReset={() => reset("volumeFeedback")}
-                >
-                  <Switch
-                    label="音量提示音"
-                    checked={settings.volumeFeedback}
-                    onChange={(volumeFeedback) => save({ volumeFeedback })}
-                  />
-                </SettingRow>
+              <Section title="高级">
                 <SettingRow
                   title="硬件加速"
-                  help="使用 GPU 渲染界面，默认开启。关闭时窗口显示期间少占约 70 MB 内存，界面效果不变。重启程序后生效"
+                  help="使用 GPU 渲染界面。关闭后窗口打开时少占约 70 MB 内存，界面效果不变。重启程序后生效"
                   isDefault={isDefault("hardwareAcceleration")}
                   onReset={() => {
                     setRestartNeeded(true);
@@ -985,18 +1095,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
                       setRestartNeeded(true);
                       save({ hardwareAcceleration });
                     }}
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="调试工具"
-                  help="在主界面显示“添加占位应用”按钮，用于测试多应用布局"
-                  isDefault={isDefault("debugTools")}
-                  onReset={() => reset("debugTools")}
-                >
-                  <Switch
-                    label="调试工具"
-                    checked={settings.debugTools}
-                    onChange={(debugTools) => save({ debugTools })}
                   />
                 </SettingRow>
               </Section>
